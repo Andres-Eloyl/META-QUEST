@@ -36,24 +36,24 @@ def get_json(endpoint: str) -> dict:
         return json.loads(resp.read())
 
 if __name__ == "__main__":
-    print("\n── Prueba 1: ping ──────────────────────────")
+    print("\n-- Prueba 1: ping -------------------------")
     try:
         res = get_json("/ping")
-        print("✓", res)
+        print("[OK]", res)
     except Exception as e:
-        print("✗ Servidor no responde:", e)
-        print("  ¿Corriste 'python server.py' primero?")
+        print("[X] Servidor no responde:", e)
+        print("  Corriste 'python server.py' primero?")
         sys.exit(1)
 
-    print("\n── Prueba 2: detección ─────────────────────")
+    print("\n-- Prueba 2: deteccion ---------------------")
     ruta = sys.argv[1] if len(sys.argv) > 1 else None
 
     if ruta:
         print(f"Usando imagen: {ruta}")
         imagen = imagen_a_base64(ruta)
     else:
-        # Genera un frame de prueba (imagen gris sintética) si no das una foto
-        print("Sin imagen proporcionada — usando frame sintético gris")
+        # Genera un frame de prueba (imagen gris sintetica) si no das una foto
+        print("Sin imagen proporcionada - usando frame sintetico gris")
         import numpy as np
         import cv2
         frame = np.ones((480, 640, 3), dtype=np.uint8) * 128
@@ -61,16 +61,16 @@ if __name__ == "__main__":
         imagen = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
 
     res = post_json("/detectar", {"imagen": imagen})
-    print(f"✓ Tiempo: {res.get('tiempo_ms')}ms")
-    print(f"✓ Detecciones: {res.get('total')}")
+    print(f"[OK] Tiempo: {res.get('tiempo_ms')}ms")
+    print(f"[OK] Detecciones: {res.get('total')}")
     for d in res.get("detecciones", []):
-        print(f"   → {d['objeto']} ({d['confianza']*100:.1f}%)")
+        print(f"   > {d['objeto']} ({d['confianza']*100:.1f}%)")
 
-    print("\n── Prueba 3: estadísticas ──────────────────")
+    print("\n-- Prueba 3: estadisticas ------------------")
     res = get_json("/estadisticas")
-    print(f"✓ Total detecciones en sesión: {res['total_detecciones']}")
-    print(f"✓ Objetos únicos: {res['objetos_unicos']}")
+    print(f"[OK] Total detecciones en sesion: {res['total_detecciones']}")
+    print(f"[OK] Objetos unicos: {res['objetos_unicos']}")
     for obj in res.get("top_objetos", []):
-        print(f"   → {obj['objeto']}: {obj['veces']} veces ({obj['confianza_promedio']*100:.0f}% conf. prom.)")
+        print(f"   > {obj['objeto']}: {obj['veces']} veces ({obj['confianza_promedio']*100:.0f}% conf. prom.)")
 
-    print("\n── Todo OK ─────────────────────────────────\n")
+    print("\n-- Todo OK ---------------------------------\n")
