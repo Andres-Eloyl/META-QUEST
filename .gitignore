@@ -14,3 +14,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+visionvr/.env
+*.db
+__pycache__/

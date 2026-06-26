@@ -10,3 +10,6 @@ numpy>=1.26.4
 
 # Descomentar cuando llegues al módulo GPT:
 # openai>=1.30.0
+
+groq
+python-dotenv

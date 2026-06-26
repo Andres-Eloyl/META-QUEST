@@ -32,11 +32,22 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Modelo YOLO — usa el más ligero para que sea rápido en tu PC
 # yolov8n.pt  = nano  (más rápido, menos preciso)  ← recomendado para empezar
-# yolov8s.pt  = small (balance)
-# yolov8m.pt  = medium (más preciso, más lento)
-MODELO_PATH = "yolov8n.pt"
+CUSTOM_MODEL_PATH = "visionvr_custom.pt"
+DEFAULT_MODEL_PATH = "yolov8n.pt"
+
+# Detectar si el usuario entrenó su propio modelo
+if os.path.exists(CUSTOM_MODEL_PATH):
+    MODELO_PATH = CUSTOM_MODEL_PATH
+    print(f"🚀 ¡Modelo personalizado detectado! Cargando {MODELO_PATH}")
+else:
+    MODELO_PATH = DEFAULT_MODEL_PATH
+    print(f"Usando modelo genérico por defecto: {MODELO_PATH}")
+
 CONFIANZA_MINIMA = 0.5   # Filtra detecciones con menos del 50% de confianza
 DB_PATH = "db/sesion.db"
+
+# ─── Estado Multi-Usuario ─────────────────────────────────────────────────────
+clientes_conectados = set()
 
 # ─── Carga del modelo (solo una vez al iniciar el servidor) ───────────────────
 
@@ -55,18 +66,24 @@ def init_db():
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             objeto    TEXT    NOT NULL,
             confianza REAL    NOT NULL,
-            timestamp TEXT    NOT NULL
+            timestamp TEXT    NOT NULL,
+            session_id TEXT   DEFAULT 'anonimo'
         )
     """)
+    # Intentar agregar la columna si la base de datos ya existía de antes
+    try:
+        con.execute("ALTER TABLE detecciones ADD COLUMN session_id TEXT DEFAULT 'anonimo'")
+    except sqlite3.OperationalError:
+        pass # La columna ya existe
     con.commit()
     con.close()
 
-def guardar_deteccion(objeto: str, confianza: float):
-    """Inserta una detección en la base de datos."""
+def guardar_deteccion(objeto: str, confianza: float, session_id: str = "anonimo"):
+    """Inserta una detección en la base de datos asociada a una sesión."""
     con = sqlite3.connect(DB_PATH)
     con.execute(
-        "INSERT INTO detecciones (objeto, confianza, timestamp) VALUES (?, ?, ?)",
-        (objeto, confianza, datetime.now().isoformat())
+        "INSERT INTO detecciones (objeto, confianza, timestamp, session_id) VALUES (?, ?, ?, ?)",
+        (objeto, confianza, datetime.now().isoformat(), session_id)
     )
     con.commit()
     con.close()
@@ -123,9 +140,9 @@ def detectar():
         if img is None:
             return jsonify({"error": "No se pudo decodificar la imagen"}), 400
 
-        # 2. Correr YOLO
+        # 2. Correr YOLO con tracking (persist=True mantiene identidad entre frames)
         inicio = time.time()
-        resultados = modelo(img, conf=CONFIANZA_MINIMA, verbose=False)
+        resultados = modelo.track(img, persist=True, conf=CONFIANZA_MINIMA, verbose=False)
         tiempo_ms = round((time.time() - inicio) * 1000)
 
         # 3. Parsear resultados
@@ -134,8 +151,10 @@ def detectar():
             for box in resultado.boxes:
                 objeto = modelo.names[int(box.cls)]
                 confianza = round(float(box.conf), 3)
+                track_id = int(box.id[0]) if box.id is not None else None
 
                 detecciones.append({
+                    "id_track": track_id,
                     "objeto": objeto,
                     "confianza": confianza,
                     # Coordenadas del bounding box (útil para el frontend)
@@ -160,12 +179,24 @@ def detectar():
         return jsonify({"error": str(e)}), 500
 
 
+@socketio.on("connect")
+def handle_connect():
+    clientes_conectados.add(request.sid)
+    print(f"✅ Nuevo cliente conectado: {request.sid}. Total: {len(clientes_conectados)}")
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    if request.sid in clientes_conectados:
+        clientes_conectados.remove(request.sid)
+    print(f"❌ Cliente desconectado: {request.sid}. Total: {len(clientes_conectados)}")
+
 @socketio.on("detectar")
 def handle_detectar(datos):
     """
     Recibe por WebSocket: { "imagen": "data:image/jpeg;base64,..." }
     Emite el evento "detecciones_resultado" con los objetos.
     """
+    session_id = request.sid
     if not datos or "imagen" not in datos:
         emit("detecciones_resultado", {"error": "Falta el campo 'imagen'"})
         return
@@ -177,9 +208,15 @@ def handle_detectar(datos):
             emit("detecciones_resultado", {"error": "No se pudo decodificar la imagen"})
             return
 
-        # 2. Correr YOLO
+        # 2. Correr YOLO con o sin tracking dependiendo de la cantidad de usuarios
         inicio = time.time()
-        resultados = modelo(img, conf=CONFIANZA_MINIMA, verbose=False)
+        usar_tracking = len(clientes_conectados) <= 1
+        
+        if usar_tracking:
+            resultados = modelo.track(img, persist=True, conf=CONFIANZA_MINIMA, verbose=False)
+        else:
+            resultados = modelo(img, conf=CONFIANZA_MINIMA, verbose=False)
+            
         tiempo_ms = round((time.time() - inicio) * 1000)
 
         # 3. Parsear resultados
@@ -188,8 +225,13 @@ def handle_detectar(datos):
             for box in resultado.boxes:
                 objeto = modelo.names[int(box.cls)]
                 confianza = round(float(box.conf), 3)
+                
+                track_id = None
+                if usar_tracking and box.id is not None:
+                    track_id = int(box.id[0])
 
                 detecciones.append({
+                    "id_track": track_id,
                     "objeto": objeto,
                     "confianza": confianza,
                     "bbox": {
@@ -199,8 +241,8 @@ def handle_detectar(datos):
                         "h": round(float(box.xyxy[0][3]) - float(box.xyxy[0][1]))
                     }
                 })
-                # Guardar en base de datos
-                guardar_deteccion(objeto, confianza)
+                # Guardar en base de datos asociado a este usuario
+                guardar_deteccion(objeto, confianza, session_id)
 
         emit("detecciones_resultado", {
             "detecciones": detecciones,
@@ -252,13 +294,14 @@ def estadisticas():
         "total_detecciones": total,
         "objetos_unicos": unicos,
         "top_objetos": [
-            {"objeto": r[0], "veces": r[1], "confianza_promedio": r[2]}
-            for r in top
+            {"objeto": row[0], "veces": row[1], "confianza_promedio": row[2]} 
+            for row in top
         ],
         "timeline": [
-            {"hora": r[0], "conteo": r[1]}
-            for r in timeline
-        ]
+            {"hora": row[0], "conteo": row[1]}
+            for row in timeline
+        ],
+        "usuarios_activos": len(clientes_conectados)
     })
 
 
@@ -277,13 +320,13 @@ def exportar():
     """Genera un archivo CSV con todo el historial de la sesión."""
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
-    filas = cur.execute("SELECT id, objeto, confianza, timestamp FROM detecciones ORDER BY timestamp ASC").fetchall()
+    filas = cur.execute("SELECT id, objeto, confianza, timestamp, session_id FROM detecciones ORDER BY timestamp ASC").fetchall()
     con.close()
 
     def generar():
-        yield "ID,Objeto,Confianza,Timestamp\n"
+        yield "ID,Objeto,Confianza,Timestamp,SessionID\n"
         for fila in filas:
-            yield f"{fila[0]},{fila[1]},{fila[2]},{fila[3]}\n"
+            yield f"{fila[0]},{fila[1]},{fila[2]},{fila[3]},{fila[4]}\n"
 
     # app.response_class permite enviar la respuesta generada sobre la marcha como un archivo descargable
     return app.response_class(
@@ -293,34 +336,42 @@ def exportar():
     )
 
 
-# ─── Módulo GPT — descomentar cuando llegues a esa capa ──────────────────────
-#
-# from openai import OpenAI
-# cliente_gpt = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-#
-# @app.route("/explicar", methods=["POST"])
-# def explicar():
-#     """
-#     Recibe un objeto detectado y devuelve una explicación de GPT.
-#     Recibe: { "objeto": "laptop", "contexto": "laboratorio de computación" }
-#     Devuelve: { "explicacion": "Una laptop es..." }
-#     """
-#     datos = request.get_json()
-#     objeto = datos.get("objeto", "objeto desconocido")
-#     contexto = datos.get("contexto", "entorno universitario")
-#
-#     respuesta = cliente_gpt.chat.completions.create(
-#         model="gpt-4o-mini",
-#         messages=[{
-#             "role": "user",
-#             "content": (
-#                 f"Explica brevemente qué es '{objeto}' en el contexto de '{contexto}'. "
-#                 f"Máximo 2 oraciones, en español, lenguaje simple."
-#             )
-#         }],
-#         max_tokens=100
-#     )
-#     return jsonify({"explicacion": respuesta.choices[0].message.content})
+# ─── Módulo Groq AI ──────────────────────────────────────────────────────────
+
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv() # Cargar API key de .env
+cliente_ia = Groq() # Automáticamente usa GROQ_API_KEY del entorno
+
+@app.route("/explicar", methods=["POST"])
+def explicar():
+    """
+    Recibe un objeto detectado y devuelve una explicación de Llama-3.
+    """
+    datos = request.get_json()
+    objeto = datos.get("objeto", "objeto desconocido")
+    contexto = datos.get("contexto", "entorno universitario")
+
+    try:
+        respuesta = cliente_ia.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Eres un asistente virtual integrado en unas gafas de realidad aumentada. "
+                    f"El usuario está apuntando a un '{objeto}'. Explica muy brevemente (1 o 2 oraciones) "
+                    f"qué es y cómo podría usarse en el contexto de '{contexto}'. Habla en español, de forma "
+                    f"directa, clara e inteligente. No uses comillas."
+                )
+            }],
+            max_tokens=150
+        )
+        texto = respuesta.choices[0].message.content.strip()
+        return jsonify({"explicacion": texto})
+    except Exception as e:
+        print("Error en Groq:", e)
+        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA."}), 500
 
 # ─── Arranque ─────────────────────────────────────────────────────────────────
 

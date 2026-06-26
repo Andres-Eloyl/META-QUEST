@@ -5,11 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VisionVR — Detección de Objetos en AR</title>
   <meta name="description" content="Frontend WebXR para detección de objetos en realidad aumentada con Meta Quest 3">
-
-  <!-- A-Frame: framework WebXR -->
-  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  <!-- Socket.IO: cliente WebSocket -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- A-Frame: framework WebXR (Local para modo Offline) -->
+  <script src="/js/aframe.min.js"></script>
+  <!-- Socket.IO: cliente WebSocket (Local para modo Offline) -->
+  <script src="/js/socket.io.min.js"></script>
 
   <style>
     /* ─── Reset ─────────────────────────────────────────────────────────── */
@@ -239,7 +238,8 @@
   <!-- ═══ SECCIÓN 2: Escena A-Frame (WebXR con passthrough) ══════════════ -->
   <a-scene
     id="escena"
-    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking, bounded-floor"
+    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking, bounded-floor, depth-sensing"
+    depth-reader
     renderer="colorManagement: true; physicallyCorrectLights: true"
     background="color: #0a0a0f"
     vr-mode-ui="enabled: true"
@@ -247,6 +247,10 @@
     <!-- Cámara con controles básicos -->
     <a-entity id="rig" position="0 1.6 0">
       <a-camera id="camara" look-controls wasd-controls></a-camera>
+      
+      <!-- Controles de Manos Nativos de Meta Quest -->
+      <a-entity id="leftHand" hand-tracking-controls="hand: left" gesture-listener></a-entity>
+      <a-entity id="rightHand" hand-tracking-controls="hand: right" raycaster="objects: .etiqueta-vr; showLine: true" gesture-listener></a-entity>
     </a-entity>
 
     <!-- Contenedor de etiquetas flotantes 3D (se llenan por JS) -->
@@ -277,18 +281,128 @@
       ></a-text>
     </a-entity>
 
+    <!-- Panel de Historial 3D -->
+    <a-entity
+      id="panel-historial-vr"
+      position="-0.8 2.2 -1.5"
+      rotation="0 20 0"
+      visible="false"
+    >
+      <a-plane
+        width="0.7"
+        height="0.6"
+        color="#111122"
+        opacity="0.85"
+        side="double"
+      ></a-plane>
+      <a-text
+        id="historial-vr-text"
+        value="Historial\n─────────\n..."
+        color="#00d8ff"
+        width="1.2"
+        position="-0.3 0.2 0.01"
+        align="left"
+        anchor="left"
+        baseline="top"
+        font="monoid"
+      ></a-text>
+    </a-entity>
+
     <!-- Iluminación ambiental mínima -->
     <a-light type="ambient" color="#fff" intensity="0.6"></a-light>
   </a-scene>
 
   <!-- ═══ SECCIÓN 3: Script JavaScript ═══════════════════════════════════ -->
   <script>
+    // ─── A-Frame: Componentes Interactivos para Manos ─────────────────────
+    
+    // 1. Escuchar Gestos (Pellizco)
+    AFRAME.registerComponent('gesture-listener', {
+      init: function () {
+        this.el.addEventListener('pinchstarted', (evt) => {
+          // Verificar si el raycaster está apuntando a algo
+          const raycasterEl = this.el.components.raycaster;
+          if (raycasterEl && raycasterEl.intersectedEls.length > 0) {
+              const intersectedEl = raycasterEl.intersectedEls[0];
+              const objectName = intersectedEl.dataset.objeto;
+              
+              if (objectName) {
+                  console.log("Pellizco sobre objeto:", objectName);
+                  hablar(`Buscando información sobre ${objectName}`);
+                  
+                  // Llamar al backend (Groq Llama-3)
+                  const url = document.getElementById('server-ip').value.replace(/\/+$/, '');
+                  fetch(`${url}/explicar`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ objeto: objectName, contexto: "laboratorio de computación" })
+                  })
+                  .then(res => res.json())
+                  .then(data => {
+                      if(data.explicacion) {
+                          hablar(data.explicacion);
+                      }
+                  })
+                  .catch(err => {
+                      console.error(err);
+                      hablar("Error al contactar a la inteligencia artificial.");
+                  });
+              }
+          } else {
+              console.log("Pellizco al aire detectado.");
+          }
+        });
+      }
+    });
+
+    // 2. Comportamiento de las etiquetas al señalarlas
+    AFRAME.registerComponent('etiqueta-interactiva', {
+      init: function () {
+        this.el.addEventListener('raycaster-intersected', evt => {
+          // Ampliar al apuntar con la mano
+          this.el.setAttribute('scale', '1.3 1.3 1.3');
+        });
+        this.el.addEventListener('raycaster-intersected-cleared', evt => {
+          // Restaurar tamaño normal
+          this.el.setAttribute('scale', '1 1 1');
+        });
+      }
+    });
+
+    // 3. Lector de Profundidad WebXR (Depth API)
+    window.lastDepthInfo = null;
+    AFRAME.registerComponent('depth-reader', {
+      tick: function (time, timeDelta) {
+        if (!this.el.is('vr-mode')) return;
+        
+        const frame = this.el.sceneEl.frame;
+        if (!frame) return;
+        
+        const refSpace = this.el.sceneEl.systems.webxr.sessionReferenceSpace;
+        const viewerPose = frame.getViewerPose(refSpace);
+        if (!viewerPose) return;
+        
+        const view = viewerPose.views[0];
+        if (view && frame.getDepthInformation) {
+            try {
+                const depthInfo = frame.getDepthInformation(view);
+                if (depthInfo) {
+                    window.lastDepthInfo = depthInfo;
+                }
+            } catch(e) {
+                // Falla silenciosamente si no está disponible aún
+            }
+        }
+      }
+    });
+
     // ─── Estado global ────────────────────────────────────────────────────
     let servidorURL = '';
     let conectado = false;
     let intervaloCaptura = null;
     let enviando = false; // Evita enviar si el anterior no ha respondido
     let socket = null;
+    let historialObjetos = []; // Almacena los últimos 10 objetos detectados
 
     // Estadísticas de sesión
     const stats = {
@@ -311,6 +425,10 @@
     const escena = document.getElementById('escena');
 
     escena.addEventListener('enter-vr', () => {
+      document.getElementById('panel-stats-vr').setAttribute('visible', 'true');
+      document.getElementById('panel-historial-vr').setAttribute('visible', 'true');
+      // Ocultar UI 2D para que no estorbe (opcional, pero buena práctica)
+      document.getElementById('capa-ui').style.display = 'none';
       panelConfig.classList.add('oculto');
       panelStats2D.classList.remove('visible');
       detecciones2D.classList.remove('visible');
@@ -456,28 +574,58 @@
 
     // ─── Procesar detecciones ─────────────────────────────────────────────
     function procesarDetecciones(detecciones) {
-      // Limpiar etiquetas anteriores (3D y 2D)
-      limpiarEtiquetas();
+      if (detecciones.length === 0) {
+          limpiarEtiquetas();
+          return;
+      }
 
-      if (detecciones.length === 0) return;
-
-      // Anunciar por voz el primer objeto
+      // Anunciar por voz el primer objeto (solo la primera vez)
       const primero = detecciones[0];
-      hablar(`${primero.objeto}, ${Math.round(primero.confianza * 100)} por ciento`);
+      // hablar(`${primero.objeto}, ${Math.round(primero.confianza * 100)} por ciento`);
 
-      // Crear etiquetas para cada detección
+      const idsDetectados = new Set();
+
+      // Actualizar o crear etiquetas
       detecciones.forEach((det, i) => {
-        crearEtiqueta3D(det, i, detecciones.length);
-        crearEtiqueta2D(det);
-
+        // Usar id_track si existe, sino crear un id temporal basado en índice y nombre
+        const uid = det.id_track != null ? `track-${det.id_track}` : `temp-${i}-${det.objeto}`;
+        idsDetectados.add(uid);
+        
+        actualizarOCrearEtiqueta3D(det, uid, i, detecciones.length);
+        
         // Acumular confianza para promedio
         stats.sumaConfianza += det.confianza;
         stats.conteoConfianza++;
+        
+        // Agregar al historial si no es el último agregado
+        if (historialObjetos.length === 0 || historialObjetos[0] !== det.objeto) {
+            historialObjetos.unshift(det.objeto);
+            if (historialObjetos.length > 8) historialObjetos.pop();
+        }
       });
+
+      actualizarHistorial();
+
+      // Eliminar etiquetas que ya no están en la detección
+      limpiarEtiquetasViejas(idsDetectados);
+      
+      // 2D tags (recrear para simplificar el panel 2D)
+      detecciones2D.innerHTML = '';
+      detecciones.forEach(det => crearEtiqueta2D(det));
     }
 
-    // ─── Crear etiqueta flotante 3D (en la escena A-Frame) ────────────────
-    function crearEtiqueta3D(deteccion, indice, total) {
+    function limpiarEtiquetasViejas(idsActivos) {
+        const contenedor = document.getElementById('contenedor-etiquetas');
+        if (!contenedor) return;
+        Array.from(contenedor.children).forEach(hijo => {
+            if (!idsActivos.has(hijo.id)) {
+                contenedor.removeChild(hijo);
+            }
+        });
+    }
+
+    // ─── Actualizar o Crear etiqueta flotante 3D ────────────────
+    function actualizarOCrearEtiqueta3D(deteccion, uid, indice, total) {
       const contenedor = document.getElementById('contenedor-etiquetas');
       if (!contenedor) return;
 
@@ -487,71 +635,109 @@
 
       let x = 0, y = 0, z = 0;
       if (deteccion.bbox) {
-        // Centro del bounding box
         const cx = deteccion.bbox.x + deteccion.bbox.w / 2;
         const cy = deteccion.bbox.y + deteccion.bbox.h / 2;
-
-        // Convertir a coordenadas normalizadas (-1 a 1)
         const ndcX = (cx / window.innerWidth) * 2 - 1;
         const ndcY = -((cy / window.innerHeight) * 2 - 1);
-
-        // Mapear a espacio 3D relativo al contenedor (Z = -2 del usuario)
         x = ndcX * 2.5; 
         y = ndcY * 1.5; 
-        z = (Math.random() - 0.5) * 0.5; // Variación para evitar superposición
+        z = -2; // Default si no hay lectura de profundidad
+
+        // Si tenemos datos del sensor LiDAR/Infrarrojo del Meta Quest:
+        if (window.lastDepthInfo) {
+            try {
+                const depthW = window.lastDepthInfo.width;
+                const depthH = window.lastDepthInfo.height;
+                const dX = Math.floor((cx / window.innerWidth) * depthW);
+                const dY = Math.floor((cy / window.innerHeight) * depthH);
+                
+                if (dX >= 0 && dX < depthW && dY >= 0 && dY < depthH) {
+                    const profMts = window.lastDepthInfo.getDepthInMeters(dX, dY);
+                    // Validar que la lectura sea razonable (entre 10 cm y 10 metros)
+                    if (profMts > 0.1 && profMts < 10) {
+                        z = -profMts;
+                        // Ajustar X e Y basado en la nueva profundidad por trigonometría simple
+                        x = ndcX * profMts * 1.25; 
+                        y = ndcY * profMts * 0.75;
+                    }
+                }
+            } catch(e) {
+                // Fallback silencioso a z = -2
+            }
+        }
       } else {
-        // Fallback: Distribuir en arco si no hay bbox
         const angulo = ((indice - (total - 1) / 2) * 0.4);
         x = Math.sin(angulo) * 2;
         y = 0.2 - (indice * 0.35);
         z = 0;
       }
 
-      // Entidad contenedora de la etiqueta
-      const entidad = document.createElement('a-entity');
-      entidad.classList.add('etiqueta-vr');
-      entidad.setAttribute('position', `${x} ${y} ${z}`);
-      entidad.setAttribute('look-at', '[camera]');
+      // Verificar si la entidad ya existe
+      let entidad = document.getElementById(uid);
+      
+      if (entidad) {
+          // Animación suave a la nueva posición
+          entidad.setAttribute('animation__mov', `property: position; to: ${x} ${y} ${z}; dur: 200; easing: linear`);
+          
+          // Actualizar texto y color (por si cambia confianza)
+          const textoEl = entidad.querySelector('a-text');
+          if(textoEl) {
+              textoEl.setAttribute('value', `${objeto.toUpperCase()}  ${porcentaje}%`);
+              textoEl.setAttribute('color', color);
+          }
+          const barraEl = entidad.querySelectorAll('a-plane')[1];
+          if(barraEl) {
+              barraEl.setAttribute('color', color);
+          }
+      } else {
+          // Si no existe, crearla desde cero
+          entidad = document.createElement('a-entity');
+          entidad.id = uid;
+          entidad.dataset.objeto = objeto; // Guardamos el nombre para el gesto pinch
+          entidad.classList.add('etiqueta-vr');
+          entidad.setAttribute('position', `${x} ${y} ${z}`);
+          entidad.setAttribute('look-at', '[camera]');
+          entidad.setAttribute('etiqueta-interactiva', '');
 
-      // Fondo de la etiqueta
-      const fondo = document.createElement('a-plane');
-      fondo.setAttribute('width', '0.8');
-      fondo.setAttribute('height', '0.18');
-      fondo.setAttribute('color', '#111122');
-      fondo.setAttribute('opacity', '0.88');
-      fondo.setAttribute('side', 'double');
+          // Fondo
+          const fondo = document.createElement('a-plane');
+          fondo.setAttribute('width', '0.8');
+          fondo.setAttribute('height', '0.18');
+          fondo.setAttribute('color', '#111122');
+          fondo.setAttribute('opacity', '0.88');
+          fondo.setAttribute('side', 'double');
 
-      // Barra de color a la izquierda
-      const barra = document.createElement('a-plane');
-      barra.setAttribute('width', '0.03');
-      barra.setAttribute('height', '0.18');
-      barra.setAttribute('color', color);
-      barra.setAttribute('position', '-0.385 0 0.001');
-      barra.setAttribute('side', 'double');
+          // Barra
+          const barra = document.createElement('a-plane');
+          barra.setAttribute('width', '0.03');
+          barra.setAttribute('height', '0.18');
+          barra.setAttribute('color', color);
+          barra.setAttribute('position', '-0.385 0 0.001');
+          barra.setAttribute('side', 'double');
 
-      // Texto principal
-      const texto = document.createElement('a-text');
-      texto.setAttribute('value', `${objeto.toUpperCase()}  ${porcentaje}%`);
-      texto.setAttribute('color', color);
-      texto.setAttribute('width', '1.5');
-      texto.setAttribute('align', 'center');
-      texto.setAttribute('position', '0 0 0.01');
-      texto.setAttribute('font', 'monoid');
+          // Texto
+          const texto = document.createElement('a-text');
+          texto.setAttribute('value', `${objeto.toUpperCase()}  ${porcentaje}%`);
+          texto.setAttribute('color', color);
+          texto.setAttribute('width', '1.5');
+          texto.setAttribute('position', '-0.33 0 0.002');
+          texto.setAttribute('align', 'left');
 
-      entidad.appendChild(fondo);
-      entidad.appendChild(barra);
-      entidad.appendChild(texto);
+          entidad.appendChild(fondo);
+          entidad.appendChild(barra);
+          entidad.appendChild(texto);
 
-      // Animación de entrada
-      entidad.setAttribute('animation', {
-        property: 'scale',
-        from: '0.3 0.3 0.3',
-        to: '1 1 1',
-        dur: 300,
-        easing: 'easeOutBack'
-      });
+          // Animación de entrada
+          entidad.setAttribute('scale', '0 0 0');
+          entidad.setAttribute('animation__scale', {
+            property: 'scale',
+            to: '1 1 1',
+            dur: 300,
+            easing: 'easeOutBack'
+          });
 
-      contenedor.appendChild(entidad);
+          contenedor.appendChild(entidad);
+      }
     }
 
     // ─── Crear etiqueta 2D (fuera de VR) ──────────────────────────────────
@@ -617,6 +803,18 @@
       }
     }
 
+    // ─── Actualizar Historial 3D ──────────────────────────────────────────
+    function actualizarHistorial() {
+        const histVRText = document.getElementById('historial-vr-text');
+        if (histVRText && historialObjetos.length > 0) {
+            let texto = "Historial Reciente\n──────────────────\n";
+            historialObjetos.forEach((obj, i) => {
+                texto += `${i + 1}. ${obj.toUpperCase()}\n`;
+            });
+            histVRText.setAttribute('value', texto);
+        }
+    }
+
     // ─── Síntesis de voz ──────────────────────────────────────────────────
     let vozDisponible = false;
 
@@ -678,6 +876,16 @@
     });
 
     console.log('VisionVR Frontend cargado — esperando conexión');
+
+    // ─── Service Worker para Modo Offline ─────────────────────────────────
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('✅ Service Worker registrado para Modo Offline:', reg.scope))
+          .catch(err => console.log('❌ Error al registrar Service Worker:', err));
+      });
+    }
+
   </script>
 </body>
 </html>
