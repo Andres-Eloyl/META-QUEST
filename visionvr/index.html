@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionVR — Detección de Objetos en AR</title>
+  <meta name="description" content="Frontend WebXR para detección de objetos en realidad aumentada con Meta Quest 3">
+
+  <!-- A-Frame: framework WebXR -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+  <style>
+    /* ─── Reset ─────────────────────────────────────────────────────────── */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      overflow: hidden;
+    }
+
+    /* ─── Panel de configuración (barra superior) ──────────────────────── */
+    #panel-config {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      border-bottom: 2px solid #00ff88;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      box-shadow: 0 4px 30px rgba(0, 255, 136, 0.15);
+      backdrop-filter: blur(10px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+    #panel-config.oculto {
+      opacity: 0;
+      transform: translateY(-100%);
+      pointer-events: none;
+    }
+
+    #panel-config h1 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #00ff88;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    #panel-config label {
+      font-size: 0.85rem;
+      color: #a0a0b0;
+      white-space: nowrap;
+    }
+
+    #input-ip {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 0.95rem;
+      width: 260px;
+      outline: none;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    #input-ip:focus {
+      border-color: #00ff88;
+      box-shadow: 0 0 12px rgba(0, 255, 136, 0.3);
+    }
+
+    #btn-conectar {
+      background: linear-gradient(135deg, #00ff88, #00cc6a);
+      color: #0a0a0f;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 24px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    #btn-conectar:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 255, 136, 0.4);
+    }
+
+    #btn-conectar:active {
+      transform: translateY(0);
+    }
+
+    #btn-conectar:disabled {
+      background: #555;
+      color: #999;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    #estado {
+      font-size: 0.9rem;
+      padding: 6px 14px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.3s;
+      white-space: nowrap;
+    }
+
+    #estado.conectado {
+      background: rgba(0, 255, 136, 0.12);
+      border-color: #00ff88;
+      color: #00ff88;
+    }
+
+    #estado.error {
+      background: rgba(255, 68, 68, 0.12);
+      border-color: #ff4444;
+      color: #ff4444;
+    }
+
+    /* ─── Overlay de estadísticas (2D, visible fuera de VR) ────────────── */
+    #panel-stats-2d {
+      position: fixed;
+      top: 80px;
+      right: 16px;
+      z-index: 9998;
+      background: rgba(10, 10, 15, 0.85);
+      border: 1px solid rgba(0, 255, 136, 0.25);
+      border-radius: 12px;
+      padding: 16px;
+      min-width: 220px;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+
+    #panel-stats-2d.visible { display: block; }
+
+    #panel-stats-2d h3 {
+      color: #00ff88;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 0.85rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .stat-label { color: #888; }
+    .stat-value { color: #fff; font-weight: 600; }
+
+    /* ─── Detecciones en 2D (fuera de VR) ──────────────────────────────── */
+    #detecciones-2d {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      right: 16px;
+      z-index: 9998;
+      display: none;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #detecciones-2d.visible { display: flex; }
+
+    .tag-2d {
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ SECCIÓN 1: Panel de Configuración ═══════════════════════════════ -->
+  <div id="panel-config">
+    <h1>🔬 VisionVR</h1>
+    <label for="input-ip">IP del servidor:</label>
+    <input
+      type="text"
+      id="input-ip"
+      placeholder="http://192.168.1.105:5000"
+      value="http://localhost:5000"
+    >
+    <button id="btn-conectar" onclick="conectar()">Conectar</button>
+    <span id="estado">⏸ Desconectado</span>
+  </div>
+
+  <!-- ═══ Panel de estadísticas 2D (fuera de VR) ═════════════════════════ -->
+  <div id="panel-stats-2d">
+    <h3>📊 Estadísticas</h3>
+    <div class="stat-row">
+      <span class="stat-label">Frames enviados</span>
+      <span class="stat-value" id="stat-frames">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Objetos detectados</span>
+      <span class="stat-value" id="stat-objetos">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Último tiempo</span>
+      <span class="stat-value" id="stat-tiempo">— ms</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Confianza prom.</span>
+      <span class="stat-value" id="stat-confianza">—</span>
+    </div>
+  </div>
+
+  <!-- ═══ Tags de detecciones 2D ═════════════════════════════════════════ -->
+  <div id="detecciones-2d"></div>
+
+  <!-- ═══ SECCIÓN 2: Escena A-Frame (WebXR con passthrough) ══════════════ -->
+  <a-scene
+    id="escena"
+    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking, bounded-floor"
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+    background="color: #0a0a0f"
+    vr-mode-ui="enabled: true"
+  >
+    <!-- Cámara con controles básicos -->
+    <a-entity id="rig" position="0 1.6 0">
+      <a-camera id="camara" look-controls wasd-controls></a-camera>
+    </a-entity>
+
+    <!-- Contenedor de etiquetas flotantes 3D (se llenan por JS) -->
+    <a-entity id="contenedor-etiquetas" position="0 1.6 -2"></a-entity>
+
+    <!-- Panel de estadísticas 3D (visible en VR) -->
+    <a-entity
+      id="panel-stats-vr"
+      position="0.8 2.2 -1.5"
+      rotation="0 -20 0"
+      visible="false"
+    >
+      <a-plane
+        width="0.6"
+        height="0.45"
+        color="#111122"
+        opacity="0.85"
+        side="double"
+      ></a-plane>
+      <a-text
+        id="stats-vr-text"
+        value="Estadísticas\n─────────\nEsperando datos..."
+        color="#00ff88"
+        width="1"
+        position="0 0 0.01"
+        align="center"
+        font="monoid"
+      ></a-text>
+    </a-entity>
+
+    <!-- Iluminación ambiental mínima -->
+    <a-light type="ambient" color="#fff" intensity="0.6"></a-light>
+  </a-scene>
+
+  <!-- ═══ SECCIÓN 3: Script JavaScript ═══════════════════════════════════ -->
+  <script>
+    // ─── Estado global ────────────────────────────────────────────────────
+    let servidorURL = '';
+    let conectado = false;
+    let intervaloCaptura = null;
+    let enviando = false; // Evita enviar si el anterior no ha respondido
+
+    // Estadísticas de sesión
+    const stats = {
+      framesEnviados: 0,
+      totalObjetos: 0,
+      ultimoTiempo: 0,
+      sumaConfianza: 0,
+      conteoConfianza: 0
+    };
+
+    // ─── Referencias DOM ──────────────────────────────────────────────────
+    const inputIP = document.getElementById('input-ip');
+    const btnConectar = document.getElementById('btn-conectar');
+    const elEstado = document.getElementById('estado');
+    const panelConfig = document.getElementById('panel-config');
+    const panelStats2D = document.getElementById('panel-stats-2d');
+    const detecciones2D = document.getElementById('detecciones-2d');
+
+    // ─── Ocultar panel al entrar/salir de VR ──────────────────────────────
+    const escena = document.getElementById('escena');
+
+    escena.addEventListener('enter-vr', () => {
+      panelConfig.classList.add('oculto');
+      panelStats2D.classList.remove('visible');
+      detecciones2D.classList.remove('visible');
+
+      // Mostrar panel VR de estadísticas
+      const panelVR = document.getElementById('panel-stats-vr');
+      if (panelVR) panelVR.setAttribute('visible', 'true');
+    });
+
+    escena.addEventListener('exit-vr', () => {
+      panelConfig.classList.remove('oculto');
+      if (conectado) {
+        panelStats2D.classList.add('visible');
+        detecciones2D.classList.add('visible');
+      }
+
+      const panelVR = document.getElementById('panel-stats-vr');
+      if (panelVR) panelVR.setAttribute('visible', 'false');
+    });
+
+    // ─── Conectar al servidor ─────────────────────────────────────────────
+    async function conectar() {
+      servidorURL = inputIP.value.trim().replace(/\/+$/, ''); // Quita trailing slashes
+
+      if (!servidorURL) {
+        mostrarEstado('⚠ Escribe la IP del servidor', 'error');
+        return;
+      }
+
+      btnConectar.disabled = true;
+      mostrarEstado('⏳ Conectando...', '');
+
+      try {
+        const resp = await fetch(`${servidorURL}/ping`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000)
+        });
+        const data = await resp.json();
+
+        if (data.status === 'ok') {
+          conectado = true;
+          mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
+
+          // Activar paneles
+          panelStats2D.classList.add('visible');
+          detecciones2D.classList.add('visible');
+
+          // Síntesis de voz: confirmar conexión
+          hablar('Sistema VisionVR activado');
+
+          // Iniciar captura cada 500ms
+          iniciarCaptura();
+        } else {
+          mostrarEstado('✗ Respuesta inesperada del servidor', 'error');
+        }
+      } catch (err) {
+        console.error('Error de conexión:', err);
+        mostrarEstado('✗ No se pudo conectar — verifica la IP', 'error');
+      }
+
+      btnConectar.disabled = false;
+    }
+
+    // ─── Mostrar estado en el badge ───────────────────────────────────────
+    function mostrarEstado(texto, clase) {
+      elEstado.textContent = texto;
+      elEstado.className = clase || '';
+    }
+
+    // ─── Captura de frames ────────────────────────────────────────────────
+    function iniciarCaptura() {
+      if (intervaloCaptura) clearInterval(intervaloCaptura);
+
+      intervaloCaptura = setInterval(() => {
+        if (!conectado || enviando) return;
+        capturarYEnviar();
+      }, 500); // 2 FPS
+    }
+
+    async function capturarYEnviar() {
+      enviando = true;
+
+      try {
+        // Obtener el canvas de A-Frame
+        const canvas = escena.canvas;
+        if (!canvas) {
+          enviando = false;
+          return;
+        }
+
+        // Capturar como JPEG en base64 (calidad 0.7 para rapidez)
+        const base64 = canvas.toDataURL('image/jpeg', 0.7);
+
+        // Enviar al servidor
+        const resp = await fetch(`${servidorURL}/detectar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imagen: base64 }),
+          signal: AbortSignal.timeout(10000)
+        });
+
+        const data = await resp.json();
+
+        // Actualizar estadísticas
+        stats.framesEnviados++;
+        stats.ultimoTiempo = data.tiempo_ms || 0;
+        stats.totalObjetos += data.total || 0;
+
+        // Procesar detecciones
+        procesarDetecciones(data.detecciones || []);
+
+        // Actualizar paneles de estadísticas
+        actualizarEstadisticas();
+
+      } catch (err) {
+        console.error('Error enviando frame:', err);
+      }
+
+      enviando = false;
+    }
+
+    // ─── Procesar detecciones ─────────────────────────────────────────────
+    function procesarDetecciones(detecciones) {
+      // Limpiar etiquetas anteriores (3D y 2D)
+      limpiarEtiquetas();
+
+      if (detecciones.length === 0) return;
+
+      // Anunciar por voz el primer objeto
+      const primero = detecciones[0];
+      hablar(`${primero.objeto}, ${Math.round(primero.confianza * 100)} por ciento`);
+
+      // Crear etiquetas para cada detección
+      detecciones.forEach((det, i) => {
+        crearEtiqueta3D(det, i, detecciones.length);
+        crearEtiqueta2D(det);
+
+        // Acumular confianza para promedio
+        stats.sumaConfianza += det.confianza;
+        stats.conteoConfianza++;
+      });
+    }
+
+    // ─── Crear etiqueta flotante 3D (en la escena A-Frame) ────────────────
+    function crearEtiqueta3D(deteccion, indice, total) {
+      const contenedor = document.getElementById('contenedor-etiquetas');
+      if (!contenedor) return;
+
+      const { objeto, confianza } = deteccion;
+      const color = colorPorConfianza(confianza);
+      const porcentaje = Math.round(confianza * 100);
+
+      // Distribuir etiquetas en arco frente al usuario
+      const angulo = ((indice - (total - 1) / 2) * 0.4);
+      const x = Math.sin(angulo) * 2;
+      const y = 0.2 - (indice * 0.35);
+      const z = -Math.cos(angulo) * 2;
+
+      // Entidad contenedora de la etiqueta
+      const entidad = document.createElement('a-entity');
+      entidad.classList.add('etiqueta-vr');
+      entidad.setAttribute('position', `${x} ${y} ${z}`);
+      entidad.setAttribute('look-at', '[camera]');
+
+      // Fondo de la etiqueta
+      const fondo = document.createElement('a-plane');
+      fondo.setAttribute('width', '0.8');
+      fondo.setAttribute('height', '0.18');
+      fondo.setAttribute('color', '#111122');
+      fondo.setAttribute('opacity', '0.88');
+      fondo.setAttribute('side', 'double');
+
+      // Barra de color a la izquierda
+      const barra = document.createElement('a-plane');
+      barra.setAttribute('width', '0.03');
+      barra.setAttribute('height', '0.18');
+      barra.setAttribute('color', color);
+      barra.setAttribute('position', '-0.385 0 0.001');
+      barra.setAttribute('side', 'double');
+
+      // Texto principal
+      const texto = document.createElement('a-text');
+      texto.setAttribute('value', `${objeto.toUpperCase()}  ${porcentaje}%`);
+      texto.setAttribute('color', color);
+      texto.setAttribute('width', '1.5');
+      texto.setAttribute('align', 'center');
+      texto.setAttribute('position', '0 0 0.01');
+      texto.setAttribute('font', 'monoid');
+
+      entidad.appendChild(fondo);
+      entidad.appendChild(barra);
+      entidad.appendChild(texto);
+
+      // Animación de entrada
+      entidad.setAttribute('animation', {
+        property: 'scale',
+        from: '0.3 0.3 0.3',
+        to: '1 1 1',
+        dur: 300,
+        easing: 'easeOutBack'
+      });
+
+      contenedor.appendChild(entidad);
+    }
+
+    // ─── Crear etiqueta 2D (fuera de VR) ──────────────────────────────────
+    function crearEtiqueta2D(deteccion) {
+      const { objeto, confianza } = deteccion;
+      const color = colorPorConfianza(confianza);
+      const porcentaje = Math.round(confianza * 100);
+
+      const tag = document.createElement('div');
+      tag.className = 'tag-2d';
+      tag.textContent = `${objeto} — ${porcentaje}%`;
+      tag.style.background = `${color}22`;
+      tag.style.color = color;
+      tag.style.border = `1px solid ${color}`;
+
+      detecciones2D.appendChild(tag);
+    }
+
+    // ─── Limpiar etiquetas ────────────────────────────────────────────────
+    function limpiarEtiquetas() {
+      // 3D
+      const contenedor = document.getElementById('contenedor-etiquetas');
+      if (contenedor) {
+        while (contenedor.firstChild) {
+          contenedor.removeChild(contenedor.firstChild);
+        }
+      }
+      // 2D
+      detecciones2D.innerHTML = '';
+    }
+
+    // ─── Color según nivel de confianza ───────────────────────────────────
+    function colorPorConfianza(confianza) {
+      if (confianza >= 0.75) return '#00ff88'; // Verde — alta
+      if (confianza >= 0.50) return '#ffcc00'; // Amarillo — media
+      return '#ff4444';                         // Rojo — baja
+    }
+
+    // ─── Actualizar paneles de estadísticas ───────────────────────────────
+    function actualizarEstadisticas() {
+      const promConfianza = stats.conteoConfianza > 0
+        ? (stats.sumaConfianza / stats.conteoConfianza * 100).toFixed(1)
+        : '—';
+
+      // Panel 2D
+      document.getElementById('stat-frames').textContent = stats.framesEnviados;
+      document.getElementById('stat-objetos').textContent = stats.totalObjetos;
+      document.getElementById('stat-tiempo').textContent = `${stats.ultimoTiempo} ms`;
+      document.getElementById('stat-confianza').textContent =
+        promConfianza !== '—' ? `${promConfianza}%` : '—';
+
+      // Panel 3D (en VR)
+      const statsVRText = document.getElementById('stats-vr-text');
+      if (statsVRText) {
+        statsVRText.setAttribute('value',
+          `Estadísticas\n` +
+          `─────────────\n` +
+          `Frames:  ${stats.framesEnviados}\n` +
+          `Objetos: ${stats.totalObjetos}\n` +
+          `Tiempo:  ${stats.ultimoTiempo} ms\n` +
+          `Conf:    ${promConfianza}%`
+        );
+      }
+    }
+
+    // ─── Síntesis de voz ──────────────────────────────────────────────────
+    let vozDisponible = false;
+
+    // Intentar activar la voz después de la primera interacción
+    document.addEventListener('click', () => {
+      if (!vozDisponible) {
+        vozDisponible = true;
+        // Hacer un utterance silencioso para desbloquear
+        const u = new SpeechSynthesisUtterance('');
+        u.volume = 0;
+        speechSynthesis.speak(u);
+      }
+    }, { once: false });
+
+    function hablar(texto) {
+      if (!('speechSynthesis' in window)) {
+        console.warn('SpeechSynthesis no disponible');
+        return;
+      }
+
+      // Cancelar cualquier utterance anterior para no acumular cola
+      speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(texto);
+      utterance.lang = 'es-ES';
+      utterance.rate = 1.1;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      // Intentar usar una voz en español
+      const voces = speechSynthesis.getVoices();
+      const vozES = voces.find(v => v.lang.startsWith('es'));
+      if (vozES) utterance.voice = vozES;
+
+      speechSynthesis.speak(utterance);
+    }
+
+    // Precargar voces (algunos navegadores las cargan async)
+    if ('speechSynthesis' in window) {
+      speechSynthesis.getVoices();
+      speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    }
+
+    // ─── Permitir conectar con Enter ──────────────────────────────────────
+    inputIP.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') conectar();
+    });
+
+    // ─── Look-at component (para que las etiquetas miren a la cámara) ─────
+    AFRAME.registerComponent('look-at', {
+      schema: { type: 'selector' },
+      tick: function () {
+        const target = this.data ? document.querySelector(this.data) : null;
+        if (target) {
+          const targetPos = target.object3D.getWorldPosition(new THREE.Vector3());
+          this.el.object3D.lookAt(targetPos);
+        }
+      }
+    });
+
+    console.log('VisionVR Frontend cargado — esperando conexión');
+  </script>
+</body>
+</html>
