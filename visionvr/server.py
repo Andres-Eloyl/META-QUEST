@@ -19,14 +19,16 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from ultralytics import YOLO
 
 # ─── Configuración ────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 CORS(app)  # Permite peticiones desde el Quest (diferente origen)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Modelo YOLO — usa el más ligero para que sea rápido en tu PC
 # yolov8n.pt  = nano  (más rápido, menos preciso)  ← recomendado para empezar
@@ -97,6 +99,12 @@ def ping():
     return jsonify({"status": "ok", "mensaje": "Servidor VisionVR activo"})
 
 
+@app.route("/dashboard")
+def dashboard():
+    """Sirve el panel de estadísticas en vivo."""
+    return send_file("dashboard.html")
+
+
 @app.route("/detectar", methods=["POST"])
 def detectar():
     """
@@ -152,6 +160,58 @@ def detectar():
         return jsonify({"error": str(e)}), 500
 
 
+@socketio.on("detectar")
+def handle_detectar(datos):
+    """
+    Recibe por WebSocket: { "imagen": "data:image/jpeg;base64,..." }
+    Emite el evento "detecciones_resultado" con los objetos.
+    """
+    if not datos or "imagen" not in datos:
+        emit("detecciones_resultado", {"error": "Falta el campo 'imagen'"})
+        return
+
+    try:
+        # 1. Decodificar imagen
+        img = base64_a_imagen(datos["imagen"])
+        if img is None:
+            emit("detecciones_resultado", {"error": "No se pudo decodificar la imagen"})
+            return
+
+        # 2. Correr YOLO
+        inicio = time.time()
+        resultados = modelo(img, conf=CONFIANZA_MINIMA, verbose=False)
+        tiempo_ms = round((time.time() - inicio) * 1000)
+
+        # 3. Parsear resultados
+        detecciones = []
+        for resultado in resultados:
+            for box in resultado.boxes:
+                objeto = modelo.names[int(box.cls)]
+                confianza = round(float(box.conf), 3)
+
+                detecciones.append({
+                    "objeto": objeto,
+                    "confianza": confianza,
+                    "bbox": {
+                        "x": round(float(box.xyxy[0][0])),
+                        "y": round(float(box.xyxy[0][1])),
+                        "w": round(float(box.xyxy[0][2]) - float(box.xyxy[0][0])),
+                        "h": round(float(box.xyxy[0][3]) - float(box.xyxy[0][1]))
+                    }
+                })
+                # Guardar en base de datos
+                guardar_deteccion(objeto, confianza)
+
+        emit("detecciones_resultado", {
+            "detecciones": detecciones,
+            "tiempo_ms": tiempo_ms,
+            "total": len(detecciones)
+        })
+
+    except Exception as e:
+        emit("detecciones_resultado", {"error": str(e)})
+
+
 @app.route("/estadisticas", methods=["GET"])
 def estadisticas():
     """
@@ -176,6 +236,16 @@ def estadisticas():
         LIMIT 5
     """).fetchall()
 
+    # Timeline: agrupado por hora:minuto:segundo (últimos 20 segundos con datos)
+    timeline = cur.execute("""
+        SELECT substr(timestamp, 12, 8) as hora, COUNT(*) 
+        FROM detecciones 
+        GROUP BY substr(timestamp, 12, 8)
+        ORDER BY timestamp DESC
+        LIMIT 20
+    """).fetchall()
+    timeline.reverse() # Cronológico de viejo a nuevo
+
     con.close()
 
     return jsonify({
@@ -184,6 +254,10 @@ def estadisticas():
         "top_objetos": [
             {"objeto": r[0], "veces": r[1], "confianza_promedio": r[2]}
             for r in top
+        ],
+        "timeline": [
+            {"hora": r[0], "conteo": r[1]}
+            for r in timeline
         ]
     })
 
@@ -196,6 +270,27 @@ def limpiar():
     con.commit()
     con.close()
     return jsonify({"mensaje": "Historial borrado"})
+
+
+@app.route("/exportar", methods=["GET"])
+def exportar():
+    """Genera un archivo CSV con todo el historial de la sesión."""
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    filas = cur.execute("SELECT id, objeto, confianza, timestamp FROM detecciones ORDER BY timestamp ASC").fetchall()
+    con.close()
+
+    def generar():
+        yield "ID,Objeto,Confianza,Timestamp\n"
+        for fila in filas:
+            yield f"{fila[0]},{fila[1]},{fila[2]},{fila[3]}\n"
+
+    # app.response_class permite enviar la respuesta generada sobre la marcha como un archivo descargable
+    return app.response_class(
+        generar(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=sesion_visionvr.csv'}
+    )
 
 
 # ─── Módulo GPT — descomentar cuando llegues a esa capa ──────────────────────
@@ -239,4 +334,4 @@ if __name__ == "__main__":
     ip = socket.gethostbyname(socket.gethostname())
     print(f"  IP en red local: http://{ip}:5000")
     print("="*50 + "\n")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)

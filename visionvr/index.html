@@ -8,6 +8,8 @@
 
   <!-- A-Frame: framework WebXR -->
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <!-- Socket.IO: cliente WebSocket -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 
   <style>
     /* ─── Reset ─────────────────────────────────────────────────────────── */
@@ -286,6 +288,7 @@
     let conectado = false;
     let intervaloCaptura = null;
     let enviando = false; // Evita enviar si el anterior no ha respondido
+    let socket = null;
 
     // Estadísticas de sesión
     const stats = {
@@ -348,18 +351,55 @@
         const data = await resp.json();
 
         if (data.status === 'ok') {
-          conectado = true;
-          mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
+          // Inicializar conexión WebSocket
+          socket = io(servidorURL);
 
-          // Activar paneles
-          panelStats2D.classList.add('visible');
-          detecciones2D.classList.add('visible');
+          socket.on('connect', () => {
+            conectado = true;
+            mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
 
-          // Síntesis de voz: confirmar conexión
-          hablar('Sistema VisionVR activado');
+            // Activar paneles
+            panelStats2D.classList.add('visible');
+            detecciones2D.classList.add('visible');
 
-          // Iniciar captura cada 500ms
-          iniciarCaptura();
+            // Síntesis de voz: confirmar conexión
+            hablar('Sistema VisionVR activado');
+
+            // Iniciar captura cada 500ms
+            iniciarCaptura();
+          });
+
+          socket.on('connect_error', (err) => {
+            console.error('Error de Socket.IO:', err);
+            mostrarEstado('✗ Error en conexión WebSocket', 'error');
+            conectado = false;
+          });
+
+          socket.on('disconnect', () => {
+            conectado = false;
+            mostrarEstado('⚠ Desconectado del servidor', 'error');
+            if (intervaloCaptura) clearInterval(intervaloCaptura);
+          });
+
+          socket.on('detecciones_resultado', (data) => {
+            enviando = false;
+            if (data.error) {
+              console.error('Error del servidor:', data.error);
+              return;
+            }
+
+            // Actualizar estadísticas
+            stats.framesEnviados++;
+            stats.ultimoTiempo = data.tiempo_ms || 0;
+            stats.totalObjetos += data.total || 0;
+
+            // Procesar detecciones
+            procesarDetecciones(data.detecciones || []);
+
+            // Actualizar paneles de estadísticas
+            actualizarEstadisticas();
+          });
+
         } else {
           mostrarEstado('✗ Respuesta inesperada del servidor', 'error');
         }
@@ -387,7 +427,11 @@
       }, 500); // 2 FPS
     }
 
-    async function capturarYEnviar() {
+    function capturarYEnviar() {
+      if (!socket || !socket.connected) {
+          enviando = false;
+          return;
+      }
       enviando = true;
 
       try {
@@ -401,32 +445,13 @@
         // Capturar como JPEG en base64 (calidad 0.7 para rapidez)
         const base64 = canvas.toDataURL('image/jpeg', 0.7);
 
-        // Enviar al servidor
-        const resp = await fetch(`${servidorURL}/detectar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imagen: base64 }),
-          signal: AbortSignal.timeout(10000)
-        });
-
-        const data = await resp.json();
-
-        // Actualizar estadísticas
-        stats.framesEnviados++;
-        stats.ultimoTiempo = data.tiempo_ms || 0;
-        stats.totalObjetos += data.total || 0;
-
-        // Procesar detecciones
-        procesarDetecciones(data.detecciones || []);
-
-        // Actualizar paneles de estadísticas
-        actualizarEstadisticas();
+        // Enviar al servidor mediante WebSocket
+        socket.emit("detectar", { imagen: base64 });
 
       } catch (err) {
         console.error('Error enviando frame:', err);
+        enviando = false;
       }
-
-      enviando = false;
     }
 
     // ─── Procesar detecciones ─────────────────────────────────────────────
@@ -460,11 +485,27 @@
       const color = colorPorConfianza(confianza);
       const porcentaje = Math.round(confianza * 100);
 
-      // Distribuir etiquetas en arco frente al usuario
-      const angulo = ((indice - (total - 1) / 2) * 0.4);
-      const x = Math.sin(angulo) * 2;
-      const y = 0.2 - (indice * 0.35);
-      const z = -Math.cos(angulo) * 2;
+      let x = 0, y = 0, z = 0;
+      if (deteccion.bbox) {
+        // Centro del bounding box
+        const cx = deteccion.bbox.x + deteccion.bbox.w / 2;
+        const cy = deteccion.bbox.y + deteccion.bbox.h / 2;
+
+        // Convertir a coordenadas normalizadas (-1 a 1)
+        const ndcX = (cx / window.innerWidth) * 2 - 1;
+        const ndcY = -((cy / window.innerHeight) * 2 - 1);
+
+        // Mapear a espacio 3D relativo al contenedor (Z = -2 del usuario)
+        x = ndcX * 2.5; 
+        y = ndcY * 1.5; 
+        z = (Math.random() - 0.5) * 0.5; // Variación para evitar superposición
+      } else {
+        // Fallback: Distribuir en arco si no hay bbox
+        const angulo = ((indice - (total - 1) / 2) * 0.4);
+        x = Math.sin(angulo) * 2;
+        y = 0.2 - (indice * 0.35);
+        z = 0;
+      }
 
       // Entidad contenedora de la etiqueta
       const entidad = document.createElement('a-entity');
