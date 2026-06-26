@@ -1,0 +1,11 @@
+# VisionVR — dependencias del backend
+# Instalar con: pip install -r requirements.txt
+
+flask>=3.0.3
+flask-cors>=4.0.1
+ultralytics>=8.2.0
+opencv-python>=4.9.0
+numpy>=1.26.4
+
+# Descomentar cuando llegues al módulo GPT:
+# openai>=1.30.0
