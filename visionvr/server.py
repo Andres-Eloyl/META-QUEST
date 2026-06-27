@@ -30,10 +30,10 @@ app = Flask(__name__)
 CORS(app)  # Permite peticiones desde el Quest (diferente origen)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Modelo YOLO — usa el más ligero para que sea rápido en tu PC
-# yolov8n.pt  = nano  (más rápido, menos preciso)  ← recomendado para empezar
+# Modelo YOLO
+# yolov8m.pt = medium (buena precisión, requiere más procesador)
 CUSTOM_MODEL_PATH = "visionvr_custom.pt"
-DEFAULT_MODEL_PATH = "yolov8n.pt"
+DEFAULT_MODEL_PATH = "yolov8m.pt"
 
 # Detectar si el usuario entrenó su propio modelo
 if os.path.exists(CUSTOM_MODEL_PATH):
@@ -120,6 +120,12 @@ def ping():
 def dashboard():
     """Sirve el panel de estadísticas en vivo."""
     return send_file("dashboard.html")
+
+
+@app.route("/movil")
+def movil():
+    """Sirve la vista simplificada 2D para probar desde el celular."""
+    return send_file("test_movil.html")
 
 
 @app.route("/detectar", methods=["POST"])
@@ -355,7 +361,7 @@ def explicar():
 
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{
                 "role": "user",
                 "content": (

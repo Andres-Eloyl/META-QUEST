@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Móvil - VisionVR</title>
+    <!-- Cargamos Socket.IO desde CDN para la prueba -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; }
+        /* El video ocupa toda la pantalla */
+        #video-bg { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
+        /* El canvas se dibuja encima para los recuadros */
+        #canvas-overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
+        /* Para capturar los toques (clicks), ponemos un div interactivo encima */
+        #touch-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 3; }
+        
+        #ui { position: absolute; bottom: 30px; left: 20px; right: 20px; z-index: 4; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 12px; border: 1px solid #00ff88; backdrop-filter: blur(5px); }
+        button { padding: 12px 20px; font-size: 16px; font-weight: bold; background: #00ff88; color: #000; border: none; border-radius: 8px; cursor: pointer; width: 100%; text-transform: uppercase; }
+        #info { margin-top: 10px; font-size: 14px; color: #ccc; text-align: center; }
+        #respuesta-ia { margin-top: 15px; color: #fff; font-size: 15px; line-height: 1.4; border-top: 1px solid #333; padding-top: 10px; }
+        .ia-label { color: #00d8ff; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <video id="video-bg" autoplay playsinline></video>
+    <canvas id="canvas-overlay"></canvas>
+    <div id="touch-layer"></div>
+    
+    <div id="ui">
+        <button id="btn-iniciar" onclick="iniciar()">Activar Cámara</button>
+        <div id="info">Presiona el botón para comenzar.</div>
+        <div id="respuesta-ia"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video-bg');
+        const canvas = document.getElementById('canvas-overlay');
+        const ctx = canvas.getContext('2d');
+        const touchLayer = document.getElementById('touch-layer');
+        const btnIniciar = document.getElementById('btn-iniciar');
+        const info = document.getElementById('info');
+        const respuestaIa = document.getElementById('respuesta-ia');
+        
+        let socket;
+        let conectado = false;
+        let enviando = false;
+        let ultimaDeteccion = [];
+
+        function ajustarCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', ajustarCanvas);
+        ajustarCanvas();
+
+        async function iniciar() {
+            try {
+                // Solicitar cámara trasera
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                btnIniciar.style.display = 'none';
+                
+                // Conectar al servidor local usando la IP en la URL actual
+                const serverUrl = window.location.origin;
+                socket = io(serverUrl);
+                
+                socket.on('connect', () => {
+                    conectado = true;
+                    info.innerHTML = 'Conectado al servidor.<br><b style="color:#00ff88;">Toca un cuadro verde</b> para usar la IA.';
+                    // Enviar un frame cada 500ms
+                    setInterval(enviarFrame, 500); 
+                });
+                
+                socket.on('detecciones_resultado', (data) => {
+                    enviando = false;
+                    if(data.detecciones) {
+                        ultimaDeteccion = data.detecciones;
+                        dibujarDetecciones();
+                    }
+                });
+                
+                socket.on('disconnect', () => {
+                    info.textContent = "Desconectado del servidor.";
+                });
+            } catch (err) {
+                alert("Error de cámara. Asegúrate de estar en red local y dar permisos: " + err.message);
+                info.textContent = "Error: " + err.message;
+            }
+        }
+
+        function enviarFrame() {
+            if(!conectado || enviando) return;
+            enviando = true;
+            
+            // Usar un canvas oculto temporal con el tamaño real del video para mandar al servidor
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+            
+            const base64 = tempCanvas.toDataURL('image/jpeg', 0.6); // 60% calidad para rapidez
+            socket.emit("detectar", { imagen: base64 });
+        }
+
+        function dibujarDetecciones() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (!video.videoWidth) return;
+
+            // Lógica matemática para encajar las coordenadas de YOLO (tamaño de video real) 
+            // a la pantalla del celular que tiene "object-fit: cover"
+            const videoRel = video.videoWidth / video.videoHeight;
+            const screenRel = canvas.width / canvas.height;
+            
+            let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+            
+            if (screenRel > videoRel) {
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / videoRel;
+                offsetY = (canvas.height - drawHeight) / 2;
+            } else {
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * videoRel;
+                offsetX = (canvas.width - drawWidth) / 2;
+            }
+
+            const scaleX = drawWidth / video.videoWidth;
+            const scaleY = drawHeight / video.videoHeight;
+
+            ultimaDeteccion.forEach(det => {
+                const box = det.bbox;
+                // Mapear coordenadas
+                const x = (box.x * scaleX) + offsetX;
+                const y = (box.y * scaleY) + offsetY;
+                const w = box.w * scaleX;
+                const h = box.h * scaleY;
+                
+                // Dibujar la caja verde
+                ctx.strokeStyle = "#00ff88";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, w, h);
+                
+                // Dibujar la etiqueta
+                ctx.fillStyle = "rgba(0, 255, 136, 0.85)";
+                ctx.fillRect(x, y - 25, w, 25);
+                
+                ctx.fillStyle = "#000";
+                ctx.font = "bold 14px sans-serif";
+                ctx.fillText(`${det.objeto} (${Math.round(det.confianza*100)}%)`, x + 5, y - 7);
+                
+                // Guardar las coordenadas mapeadas en el objeto para cuando el usuario haga "tap"
+                det.pantalla = {x, y, w, h};
+            });
+        }
+
+        // Detectar toques en la pantalla (simulando el raycaster del Quest)
+        touchLayer.addEventListener('click', (e) => {
+            const clickX = e.clientX;
+            const clickY = e.clientY;
+            
+            // Buscar si tocamos alguna de las cajas de detección
+            for(let det of ultimaDeteccion) {
+                if (det.pantalla && 
+                    clickX >= det.pantalla.x && clickX <= (det.pantalla.x + det.pantalla.w) &&
+                    clickY >= det.pantalla.y && clickY <= (det.pantalla.y + det.pantalla.h)) {
+                    
+                    respuestaIa.innerHTML = `<span class="ia-label">Consultando a Groq sobre:</span> ${det.objeto}...`;
+                    
+                    fetch('/explicar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ objeto: det.objeto, contexto: "entorno universitario" })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        respuestaIa.innerHTML = `<span class="ia-label">Llama 3:</span> ${data.explicacion}`;
+                        // Opcional: Hablarlo en voz alta con el teléfono
+                        try {
+                            const ut = new SpeechSynthesisUtterance(data.explicacion);
+                            ut.lang = 'es-ES';
+                            speechSynthesis.speak(ut);
+                        } catch(e) {}
+                    })
+                    .catch(err => {
+                        respuestaIa.innerHTML = `<span style="color:red">Error:</span> No se pudo contactar a la IA.`;
+                    });
+                    
+                    break; // Solo consultar el primer objeto tocado
+                }
+            }
+        });
+    </script>
+</body>
+</html>
