@@ -63,7 +63,9 @@
                 
                 // Conectar al servidor local usando la IP en la URL actual
                 const serverUrl = window.location.origin;
-                socket = io(serverUrl);
+                socket = io(serverUrl, { 
+                    extraHeaders: { "Bypass-Tunnel-Reminder": "true" } 
+                });
                 
                 socket.on('connect', () => {
                     conectado = true;

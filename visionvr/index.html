@@ -208,12 +208,17 @@
       value="http://localhost:5000"
     >
     <button id="btn-conectar" onclick="conectar()">Conectar</button>
+    <button id="btn-demo" style="background: rgba(0,216,255,0.2); border: 1px solid #00d8ff; color: #00d8ff; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer;" onclick="toggleModoDemo()">❄ Modo Demo</button>
     <span id="estado">⏸ Desconectado</span>
   </div>
 
   <!-- ═══ Panel de estadísticas 2D (fuera de VR) ═════════════════════════ -->
   <div id="panel-stats-2d">
     <h3>📊 Estadísticas</h3>
+    <div class="stat-row">
+      <span class="stat-label">FPS Procesamiento</span>
+      <span class="stat-value" id="stat-fps">0</span>
+    </div>
     <div class="stat-row">
       <span class="stat-label">Frames enviados</span>
       <span class="stat-value" id="stat-frames">0</span>
@@ -231,6 +236,7 @@
       <span class="stat-value" id="stat-confianza">—</span>
     </div>
   </div>
+
 
   <!-- ═══ Tags de detecciones 2D ═════════════════════════════════════════ -->
   <div id="detecciones-2d"></div>
@@ -308,8 +314,58 @@
       ></a-text>
     </a-entity>
 
+    <!-- Panel de Alerta/Error 3D (visible en VR cuando falla la red) -->
+    <a-entity
+      id="panel-error-vr"
+      position="0 1.2 -1.2"
+      visible="false"
+    >
+      <a-plane
+        width="0.9"
+        height="0.35"
+        color="#330000"
+        opacity="0.9"
+        side="double"
+      ></a-plane>
+      <a-text
+        id="error-vr-text"
+        value="⚠️ ALERTA DE CONEXIÓN\nReintentando en 3s..."
+        color="#ff4444"
+        width="1.3"
+        position="0 0 0.01"
+        align="center"
+        font="monoid"
+      ></a-text>
+    </a-entity>
+
+    <!-- Panel de Alerta de Objeto Peligroso / Riesgo 3D -->
+    <a-entity
+      id="panel-peligro-vr"
+      position="0 2.4 -1.3"
+      visible="false"
+    >
+      <a-plane
+        width="1.2"
+        height="0.35"
+        color="#aa0000"
+        opacity="0.92"
+        side="double"
+      ></a-plane>
+      <a-text
+        id="peligro-vr-text"
+        value="⚠️ PRECAUCIÓN: OBJETO DE RIESGO DETECTADO"
+        color="#ffffff"
+        width="1.4"
+        position="0 0 0.01"
+        align="center"
+        font="monoid"
+      ></a-text>
+    </a-entity>
+
     <!-- Iluminación ambiental mínima -->
     <a-light type="ambient" color="#fff" intensity="0.6"></a-light>
+
+
   </a-scene>
 
   <!-- ═══ SECCIÓN 3: Script JavaScript ═══════════════════════════════════ -->
@@ -331,7 +387,7 @@
                   hablar(`Buscando información sobre ${objectName}`);
                   
                   // Llamar al backend (Groq Llama-3)
-                  const url = document.getElementById('server-ip').value.replace(/\/+$/, '');
+                  const url = servidorURL || document.getElementById('input-ip').value.trim().replace(/\/+$/, '');
                   fetch(`${url}/explicar`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -403,6 +459,83 @@
     let enviando = false; // Evita enviar si el anterior no ha respondido
     let socket = null;
     let historialObjetos = []; // Almacena los últimos 10 objetos detectados
+    
+    // Auto-reconexión
+    let timerReconexion = null;
+    let reintentosReconexion = 0;
+
+    // Modo Demo
+    let modoDemo = false;
+    let ultimasDeteccionesDemo = [];
+
+    // FPS Counter
+    let lastFrameTime = performance.now();
+    let fpsActual = 0;
+
+    // Web Audio API para sonidos (Detección y Alerta de Peligro)
+    let audioCtx = null;
+    function reproducirSonidoDeteccion() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch(e) {}
+    }
+
+    let lastPeligroTime = 0;
+    function reproducirSonidoPeligro() {
+      const now = performance.now();
+      if (now - lastPeligroTime < 2000) return; // Cooldown 2 segundos
+      lastPeligroTime = now;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      } catch(e) {}
+    }
+
+    // Análisis de Escena Periódico (Llama-3 cada 15s)
+    let timerAnalisisEscena = null;
+    function iniciarAnalisisEscenaPeriodico() {
+      if (timerAnalisisEscena) clearInterval(timerAnalisisEscena);
+      timerAnalisisEscena = setInterval(() => {
+        if (!conectado || modoDemo || historialObjetos.length === 0) return;
+        
+        const url = servidorURL || document.getElementById('input-ip').value.trim().replace(/\/+$/, '');
+        fetch(`${url}/analizar_escena`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ objetos: historialObjetos.slice(0, 5) })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.resumen) {
+            console.log("🧠 Resumen global de escena (Llama-3):", data.resumen);
+          }
+        })
+        .catch(err => console.error("Error analizando escena:", err));
+      }, 15000); // 15 segundos
+    }
+
 
     // Estadísticas de sesión
     const stats = {
@@ -420,6 +553,24 @@
     const panelConfig = document.getElementById('panel-config');
     const panelStats2D = document.getElementById('panel-stats-2d');
     const detecciones2D = document.getElementById('detecciones-2d');
+    const panelErrorVR = document.getElementById('panel-error-vr');
+
+    // ─── Modo Demo Toggle ────────────────────────────────────────────────
+    function toggleModoDemo() {
+      modoDemo = !modoDemo;
+      const btnDemo = document.getElementById('btn-demo');
+      if (modoDemo) {
+        btnDemo.style.background = '#00d8ff';
+        btnDemo.style.color = '#0a0a0f';
+        btnDemo.textContent = '❄ Modo Demo (CONGELADO)';
+        mostrarEstado('❄ Modo Demo Activo — Detección Congelada', 'conectado');
+      } else {
+        btnDemo.style.background = 'rgba(0,216,255,0.2)';
+        btnDemo.style.color = '#00d8ff';
+        btnDemo.textContent = '❄ Modo Demo';
+        if (conectado) mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
+      }
+    }
 
     // ─── Ocultar panel al entrar/salir de VR ──────────────────────────────
     const escena = document.getElementById('escena');
@@ -427,15 +578,11 @@
     escena.addEventListener('enter-vr', () => {
       document.getElementById('panel-stats-vr').setAttribute('visible', 'true');
       document.getElementById('panel-historial-vr').setAttribute('visible', 'true');
-      // Ocultar UI 2D para que no estorbe (opcional, pero buena práctica)
-      document.getElementById('capa-ui').style.display = 'none';
+      const capaUI = document.getElementById('capa-ui');
+      if (capaUI) capaUI.style.display = 'none';
       panelConfig.classList.add('oculto');
       panelStats2D.classList.remove('visible');
       detecciones2D.classList.remove('visible');
-
-      // Mostrar panel VR de estadísticas
-      const panelVR = document.getElementById('panel-stats-vr');
-      if (panelVR) panelVR.setAttribute('visible', 'true');
     });
 
     escena.addEventListener('exit-vr', () => {
@@ -444,14 +591,12 @@
         panelStats2D.classList.add('visible');
         detecciones2D.classList.add('visible');
       }
-
-      const panelVR = document.getElementById('panel-stats-vr');
-      if (panelVR) panelVR.setAttribute('visible', 'false');
+      document.getElementById('panel-stats-vr').setAttribute('visible', 'false');
     });
 
-    // ─── Conectar al servidor ─────────────────────────────────────────────
+    // ─── Conectar al servidor con Auto-Reconexión ─────────────────────────
     async function conectar() {
-      servidorURL = inputIP.value.trim().replace(/\/+$/, ''); // Quita trailing slashes
+      servidorURL = inputIP.value.trim().replace(/\/+$/, '');
 
       if (!servidorURL) {
         mostrarEstado('⚠ Escribe la IP del servidor', 'error');
@@ -469,65 +614,93 @@
         const data = await resp.json();
 
         if (data.status === 'ok') {
-          // Inicializar conexión WebSocket
-          socket = io(servidorURL);
-
-          socket.on('connect', () => {
-            conectado = true;
-            mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
-
-            // Activar paneles
-            panelStats2D.classList.add('visible');
-            detecciones2D.classList.add('visible');
-
-            // Síntesis de voz: confirmar conexión
-            hablar('Sistema VisionVR activado');
-
-            // Iniciar captura cada 500ms
-            iniciarCaptura();
-          });
-
-          socket.on('connect_error', (err) => {
-            console.error('Error de Socket.IO:', err);
-            mostrarEstado('✗ Error en conexión WebSocket', 'error');
-            conectado = false;
-          });
-
-          socket.on('disconnect', () => {
-            conectado = false;
-            mostrarEstado('⚠ Desconectado del servidor', 'error');
-            if (intervaloCaptura) clearInterval(intervaloCaptura);
-          });
-
-          socket.on('detecciones_resultado', (data) => {
-            enviando = false;
-            if (data.error) {
-              console.error('Error del servidor:', data.error);
-              return;
-            }
-
-            // Actualizar estadísticas
-            stats.framesEnviados++;
-            stats.ultimoTiempo = data.tiempo_ms || 0;
-            stats.totalObjetos += data.total || 0;
-
-            // Procesar detecciones
-            procesarDetecciones(data.detecciones || []);
-
-            // Actualizar paneles de estadísticas
-            actualizarEstadisticas();
-          });
+          if (!socket) {
+            socket = io(servidorURL, { 
+                reconnection: true, 
+                reconnectionDelay: 3000,
+                extraHeaders: { "Bypass-Tunnel-Reminder": "true" }
+            });
+            registrarListenersSocket();
+          } else {
+            socket.connect();
+          }
 
         } else {
           mostrarEstado('✗ Respuesta inesperada del servidor', 'error');
+          manejarDesconexion('Respuesta inesperada');
         }
       } catch (err) {
         console.error('Error de conexión:', err);
-        mostrarEstado('✗ No se pudo conectar — verifica la IP', 'error');
+        mostrarEstado('✗ No se pudo conectar — reintentando...', 'error');
+        manejarDesconexion('Fallo al conectar');
       }
 
       btnConectar.disabled = false;
     }
+
+    function registrarListenersSocket() {
+      socket.on('connect', () => {
+        conectado = true;
+        mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
+        if (panelErrorVR) panelErrorVR.setAttribute('visible', 'false');
+
+        panelStats2D.classList.add('visible');
+        detecciones2D.classList.add('visible');
+
+        hablar('Sistema VisionVR activado');
+        iniciarCaptura();
+        iniciarAnalisisEscenaPeriodico();
+      });
+
+      socket.on('connect_error', (err) => {
+        console.error('Error de Socket.IO:', err);
+        manejarDesconexion('Error de red');
+      });
+
+      socket.on('disconnect', () => {
+        manejarDesconexion('Desconectado del servidor');
+      });
+
+      socket.on('detecciones_resultado', (data) => {
+        enviando = false;
+        if (data.error) {
+          console.error('Error del servidor:', data.error);
+          return;
+        }
+
+        // Calcular FPS
+        const now = performance.now();
+        fpsActual = Math.round(1000 / Math.max(1, (now - lastFrameTime)));
+        lastFrameTime = now;
+
+        stats.framesEnviados++;
+        stats.ultimoTiempo = data.tiempo_ms || 0;
+        stats.totalObjetos += data.total || 0;
+
+        if (!modoDemo) {
+          ultimasDeteccionesDemo = data.detecciones || [];
+          procesarDetecciones(ultimasDeteccionesDemo);
+        }
+
+        actualizarEstadisticas();
+      });
+    }
+
+    function manejarDesconexion(motivo) {
+      conectado = false;
+      mostrarEstado(`⚠️ ${motivo} — Reintentando en 3s...`, 'error');
+      if (panelErrorVR) panelErrorVR.setAttribute('visible', 'true');
+      
+      if (timerReconexion) clearTimeout(timerReconexion);
+      timerReconexion = setTimeout(() => {
+        if (!conectado && !modoDemo) {
+          reintentosReconexion++;
+          console.log(`Reintento de conexión #${reintentosReconexion}...`);
+          conectar();
+        }
+      }, 3000);
+    }
+
 
     // ─── Mostrar estado en el badge ───────────────────────────────────────
     function mostrarEstado(texto, clase) {
@@ -553,17 +726,13 @@
       enviando = true;
 
       try {
-        // Obtener el canvas de A-Frame
         const canvas = escena.canvas;
         if (!canvas) {
           enviando = false;
           return;
         }
 
-        // Capturar como JPEG en base64 (calidad 0.7 para rapidez)
         const base64 = canvas.toDataURL('image/jpeg', 0.7);
-
-        // Enviar al servidor mediante WebSocket
         socket.emit("detectar", { imagen: base64 });
 
       } catch (err) {
@@ -574,45 +743,50 @@
 
     // ─── Procesar detecciones ─────────────────────────────────────────────
     function procesarDetecciones(detecciones) {
+      const panelPeligroVR = document.getElementById('panel-peligro-vr');
+
       if (detecciones.length === 0) {
           limpiarEtiquetas();
+          if (panelPeligroVR) panelPeligroVR.setAttribute('visible', 'false');
           return;
       }
 
-      // Anunciar por voz el primer objeto (solo la primera vez)
-      const primero = detecciones[0];
-      // hablar(`${primero.objeto}, ${Math.round(primero.confianza * 100)} por ciento`);
-
       const idsDetectados = new Set();
+      let hayPeligro = false;
 
       // Actualizar o crear etiquetas
       detecciones.forEach((det, i) => {
-        // Usar id_track si existe, sino crear un id temporal basado en índice y nombre
         const uid = det.id_track != null ? `track-${det.id_track}` : `temp-${i}-${det.objeto}`;
         idsDetectados.add(uid);
         
         actualizarOCrearEtiqueta3D(det, uid, i, detecciones.length);
         
-        // Acumular confianza para promedio
         stats.sumaConfianza += det.confianza;
         stats.conteoConfianza++;
         
-        // Agregar al historial si no es el último agregado
+        if (det.peligro) {
+          hayPeligro = true;
+          reproducirSonidoPeligro();
+        }
+
         if (historialObjetos.length === 0 || historialObjetos[0] !== det.objeto) {
             historialObjetos.unshift(det.objeto);
             if (historialObjetos.length > 8) historialObjetos.pop();
+            if (!det.peligro) reproducirSonidoDeteccion();
         }
       });
 
-      actualizarHistorial();
+      if (panelPeligroVR) {
+        panelPeligroVR.setAttribute('visible', hayPeligro ? 'true' : 'false');
+      }
 
-      // Eliminar etiquetas que ya no están en la detección
+      actualizarHistorial();
       limpiarEtiquetasViejas(idsDetectados);
       
-      // 2D tags (recrear para simplificar el panel 2D)
       detecciones2D.innerHTML = '';
       detecciones.forEach(det => crearEtiqueta2D(det));
     }
+
 
     function limpiarEtiquetasViejas(idsActivos) {
         const contenedor = document.getElementById('contenedor-etiquetas');
@@ -783,6 +957,8 @@
         : '—';
 
       // Panel 2D
+      const statFpsEl = document.getElementById('stat-fps');
+      if (statFpsEl) statFpsEl.textContent = fpsActual;
       document.getElementById('stat-frames').textContent = stats.framesEnviados;
       document.getElementById('stat-objetos').textContent = stats.totalObjetos;
       document.getElementById('stat-tiempo').textContent = `${stats.ultimoTiempo} ms`;
@@ -795,6 +971,7 @@
         statsVRText.setAttribute('value',
           `Estadísticas\n` +
           `─────────────\n` +
+          `FPS:     ${fpsActual}\n` +
           `Frames:  ${stats.framesEnviados}\n` +
           `Objetos: ${stats.totalObjetos}\n` +
           `Tiempo:  ${stats.ultimoTiempo} ms\n` +
@@ -802,6 +979,7 @@
         );
       }
     }
+
 
     // ─── Actualizar Historial 3D ──────────────────────────────────────────
     function actualizarHistorial() {

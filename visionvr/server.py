@@ -181,7 +181,9 @@ def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
     
     objetos_actuales = set()
     for d in detecciones_raw:
-        uid = f"{d['objeto']}_{d['id_track']}" if d.get('id_track') is not None else d["objeto"]
+        # Usamos solo el nombre del objeto para el filtro ensemble,
+        # ya que los IDs de tracking pueden ser inestables en cámaras móviles
+        uid = d["objeto"]
         objetos_actuales.add(uid)
         
     estado["buffer_historico_frames"].append(objetos_actuales)
@@ -199,7 +201,7 @@ def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
     
     filtradas = []
     for d in detecciones_raw:
-        uid = f"{d['objeto']}_{d['id_track']}" if d.get('id_track') is not None else d["objeto"]
+        uid = d["objeto"]
         if uid in objetos_validos:
             filtradas.append(d)
     return filtradas
@@ -541,13 +543,16 @@ def exportar():
     )
 
 
-# ─── Módulo Groq AI ──────────────────────────────────────────────────────────
+# ─── Módulo IA (NVIDIA NIM) ──────────────────────────────────────────────────
 
-from groq import Groq
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv() # Cargar API key de .env
-cliente_ia = Groq() # Automáticamente usa GROQ_API_KEY del entorno
+cliente_ia = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=os.environ.get("NVIDIA_API_KEY")
+)
 
 @app.route("/explicar", methods=["POST"])
 def explicar():
@@ -560,7 +565,7 @@ def explicar():
 
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="meta/llama-3.1-70b-instruct",
             messages=[{
                 "role": "user",
                 "content": (
@@ -575,8 +580,8 @@ def explicar():
         texto = respuesta.choices[0].message.content.strip()
         return jsonify({"explicacion": texto})
     except Exception as e:
-        print("Error en Groq:", e)
-        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA."}), 500
+        print("Error en NVIDIA API:", e)
+        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA de NVIDIA."}), 500
 
 
 @app.route("/analizar_escena", methods=["POST"])
@@ -593,7 +598,7 @@ def analizar_escena():
     lista_str = ", ".join(list(set(objetos)))
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="meta/llama-3.1-70b-instruct",
             messages=[{
                 "role": "user",
                 "content": (
@@ -608,7 +613,7 @@ def analizar_escena():
         resumen = respuesta.choices[0].message.content.strip()
         return jsonify({"resumen": resumen})
     except Exception as e:
-        print("Error en analizar_escena Groq:", e)
+        print("Error en analizar_escena NVIDIA:", e)
         return jsonify({"resumen": f"Objetos visibles en escena: {lista_str}."})
 
 

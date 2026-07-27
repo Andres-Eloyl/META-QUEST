@@ -8,8 +8,10 @@ ultralytics>=8.2.0
 opencv-python>=4.9.0
 numpy>=1.26.4
 
-# Descomentar cuando llegues al módulo GPT:
-# openai>=1.30.0
+# Usar OpenAI para la API compatible de NVIDIA:
+openai>=1.30.0
 
-groq
+# groq  (Ya no se usa)
 python-dotenv
+onnx
+onnxruntime
