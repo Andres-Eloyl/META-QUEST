@@ -21,6 +21,16 @@
             --accent: #00ff88;
         }
 
+        body.light-theme {
+            --bg-color: #f4f6f9;
+            --surface-color: #ffffff;
+            --border-color: rgba(0, 0, 0, 0.1);
+            --accent-glow: rgba(0, 200, 100, 0.1);
+            --text-primary: #1a1a2e;
+            --text-secondary: #555e6d;
+            --accent: #00aa55;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -37,7 +47,9 @@
                 radial-gradient(circle at 85% 30%, rgba(0, 150, 255, 0.1), transparent 25%);
             background-attachment: fixed;
             padding: 2rem;
+            transition: background-color 0.3s, color 0.3s;
         }
+
 
         header {
             display: flex;
@@ -207,6 +219,7 @@
         
         <div class="flex-row">
             <input type="text" id="server-ip" class="btn" value="http://localhost:5000" style="width: 200px; text-align: left; cursor: text;" placeholder="IP del servidor">
+            <button class="btn" id="btn-tema" onclick="toggleTema()">☀️ Tema Claro</button>
             <button class="btn" onclick="exportarCSV()" style="background: rgba(0, 255, 136, 0.1); color: var(--accent); border-color: rgba(0, 255, 136, 0.2);">Exportar CSV</button>
             <button class="btn" onclick="limpiarDatos()">Borrar Historial</button>
             <div id="status-badge" class="status-badge">
@@ -214,6 +227,7 @@
                 <span>Conectando...</span>
             </div>
         </div>
+
     </header>
 
     <div class="dashboard-grid">
@@ -243,12 +257,19 @@
             </ul>
         </div>
 
-        <!-- Gráfico -->
+        <!-- Gráfico Timeline -->
         <div class="card chart-container">
             <div class="card-header">Actividad Reciente (detecciones por segundo)</div>
             <canvas id="timelineChart"></canvas>
         </div>
+
+        <!-- Gráfico Mapa de Calor Espacial -->
+        <div class="card chart-container">
+            <div class="card-header">Mapa de Calor por Zonas Espaciales</div>
+            <canvas id="heatmapChart"></canvas>
+        </div>
     </div>
+
 
     <script>
         // Configuración de la gráfica Chart.js
@@ -297,6 +318,28 @@
             }
         });
 
+        // Configuración de la gráfica Mapa de Calor
+        const ctxHeat = document.getElementById('heatmapChart').getContext('2d');
+        const heatmapChart = new Chart(ctxHeat, {
+            type: 'doughnut',
+            data: {
+                labels: ['Centro', 'Arriba-Izq', 'Arriba-Der', 'Abajo-Izq', 'Abajo-Der'],
+                datasets: [{
+                    data: [0, 0, 0, 0, 0],
+                    backgroundColor: ['#00ff88', '#00d8ff', '#ff0055', '#ffcc00', '#aa00ff'],
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.1)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right' }
+                }
+            }
+        });
+
         const badge = document.getElementById('status-badge');
         const badgeText = badge.querySelector('span');
 
@@ -333,23 +376,48 @@
                     listEl.innerHTML = '<li><span class="text-secondary" style="color: #8b92a5;">No hay detecciones aún</span></li>';
                 } else {
                     data.top_objetos.forEach(obj => {
-                        listEl.innerHTML += `
-                            <li>
-                                <span class="obj-name">${obj.objeto}</span>
-                                <div class="obj-stats">
-                                    <span>Conf: ${Math.round(obj.confianza_promedio * 100)}%</span>
-                                    <span class="obj-count">${obj.veces}</span>
-                                </div>
-                            </li>
-                        `;
+                        const li = document.createElement('li');
+                        
+                        const spanName = document.createElement('span');
+                        spanName.className = 'obj-name';
+                        spanName.textContent = obj.objeto; // PREVENT XSS
+                        
+                        const divStats = document.createElement('div');
+                        divStats.className = 'obj-stats';
+                        
+                        const spanConf = document.createElement('span');
+                        spanConf.textContent = `Conf: ${Math.round(obj.confianza_promedio * 100)}%`;
+                        
+                        const spanCount = document.createElement('span');
+                        spanCount.className = 'obj-count';
+                        spanCount.textContent = obj.veces;
+                        
+                        divStats.appendChild(spanConf);
+                        divStats.appendChild(spanCount);
+                        
+                        li.appendChild(spanName);
+                        li.appendChild(divStats);
+                        listEl.appendChild(li);
                     });
                 }
 
-                // Actualizar Gráfica
+                // Actualizar Gráfica Timeline
                 if(data.timeline && data.timeline.length > 0) {
                     chart.data.labels = data.timeline.map(t => t.hora);
                     chart.data.datasets[0].data = data.timeline.map(t => t.conteo);
                     chart.update();
+                }
+
+                // Actualizar Gráfica Mapa de Calor
+                if(data.mapa_calor) {
+                    heatmapChart.data.datasets[0].data = [
+                        data.mapa_calor.centro || 0,
+                        data.mapa_calor.top_left || 0,
+                        data.mapa_calor.top_right || 0,
+                        data.mapa_calor.bottom_left || 0,
+                        data.mapa_calor.bottom_right || 0
+                    ];
+                    heatmapChart.update();
                 }
 
             } catch(e) {
@@ -357,6 +425,7 @@
                 setStatus(false);
             }
         }
+
 
         async function limpiarDatos() {
             const url = document.getElementById('server-ip').value.replace(/\/+$/, '');
@@ -366,6 +435,8 @@
                 chart.data.labels = [];
                 chart.data.datasets[0].data = [];
                 chart.update();
+                heatmapChart.data.datasets[0].data = [0, 0, 0, 0, 0];
+                heatmapChart.update();
                 fetchStats();
             } catch(e) {
                 alert("Error limpiando historial");
@@ -378,9 +449,16 @@
             window.open(`${url}/exportar`, '_blank');
         }
 
+        function toggleTema() {
+            document.body.classList.toggle('light-theme');
+            const esClaro = document.body.classList.contains('light-theme');
+            document.getElementById('btn-tema').textContent = esClaro ? '🌙 Tema Oscuro' : '☀️ Tema Claro';
+        }
+
         // Iniciar ciclo de actualización cada 2 segundos
         setInterval(fetchStats, 2000);
         fetchStats();
+
 
     </script>
 </body>
