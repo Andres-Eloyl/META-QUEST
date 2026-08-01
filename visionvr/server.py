@@ -3,12 +3,12 @@ VisionVR — Servidor Backend
 ============================
 Autor: Andrés
 Materia: Inteligencia Artificial
-Motor: Flask + YOLOv8 + SQLite + OpenAI (modular)
+Motor: Flask + YOLOv8 + SQLite + NVIDIA NIM (Llama-3)
 
 Módulos activos:
   [x] Núcleo: detección de objetos con YOLO
   [x] Base de datos: registro de sesión en SQLite
-  [ ] GPT: modo "explícame" (descomentar cuando llegues a esa capa)
+  [x] IA: modo "explícame" y análisis de escena (NVIDIA NIM / Llama-3)
 """
 
 import base64
@@ -20,7 +20,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 import torch
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from ultralytics import YOLO
@@ -39,7 +39,6 @@ print(f"⚡ Hilos CPU PyTorch optimizados a: {num_cpus}")
 # Modelo YOLO & ONNX
 CUSTOM_MODEL_PATH = "visionvr_custom.pt"
 DEFAULT_MODEL_PATH = "yolov8m.pt"
-ONNX_MODEL_PATH = "visionvr_model.onnx"
 
 if os.path.exists(CUSTOM_MODEL_PATH):
     BASE_MODEL_PATH = CUSTOM_MODEL_PATH
@@ -48,7 +47,6 @@ else:
     BASE_MODEL_PATH = DEFAULT_MODEL_PATH
     print(f"Usando modelo genérico por defecto: {BASE_MODEL_PATH}")
 
-ONNX_MODEL_PATH = BASE_MODEL_PATH.replace(".pt", ".onnx")
 CONFIANZA_MINIMA = 0.5   # Filtra detecciones con menos del 50% de confianza
 DB_PATH = "db/sesion.db"
 
@@ -59,6 +57,7 @@ clientes_conectados = set()
 
 print("Cargando modelo YOLO...")
 # Intentar cargar ONNX si existe
+ONNX_MODEL_PATH = BASE_MODEL_PATH.replace(".pt", ".onnx")
 if os.path.exists(ONNX_MODEL_PATH):
     MODELO_PATH = ONNX_MODEL_PATH
     print(f"⚡ Modelo ONNX detectado: {MODELO_PATH}")
@@ -80,9 +79,10 @@ else:
 modelo = YOLO(MODELO_PATH)
 print(f"Modelo listo: {MODELO_PATH}")
 
-# ─── Preprocesamiento, Auto-Rotación, ROI y Caché CV ────────────────────────
+# ─── Preprocesamiento, Auto-Rotación, ROI y Caché CV ────────────────────
 
 from collections import deque, Counter
+import threading
 
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 MSE_UMBRAL_SIMILITUD = 35.0  # Umbral de diferencia para reusar detecciones
@@ -94,7 +94,7 @@ def init_estado_sesion(session_id: str):
         estado_sesiones[session_id] = {
             "ultimo_frame_gray": None,
             "ultimas_detecciones_cache": None,
-            "buffer_historico_frames": deque(maxlen=5)
+            "buffer_historico_frames": deque(maxlen=3)
         }
 
 # Lista de objetos clasificados como de riesgo/precaución
@@ -128,11 +128,12 @@ def calcular_zona(bbox: dict) -> str:
 
 def preprocesar_imagen(img_cv2: np.ndarray, solo_roi: bool = False) -> np.ndarray:
     """
-    1. Aplica auto-rotación si el frame viene vertical (#14).
-    2. Si solo_roi es True (#9), recorta el 70% central de la imagen.
-    3. Redimensiona a 640x640 y aplica CLAHE en espacio LAB.
+    1. Si solo_roi es True (#9), recorta el 70% central de la imagen.
+    2. Redimensiona a 640x640 y aplica CLAHE en espacio LAB.
     """
-    img_cv2 = corregir_orientacion(img_cv2)
+    # Fix: Se desactiva la auto-rotación para móviles verticales.
+    # Rotar la imagen 90° causaba que YOLO viera los objetos de lado
+    # y que las coordenadas de los cuadros no coincidieran en la pantalla del celular.
     
     if solo_roi:
         h, w = img_cv2.shape[:2]
@@ -172,9 +173,9 @@ def obtener_detecciones_cache(img_cv2: np.ndarray, session_id: str):
 
 def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
     """
-    Ensemble de frames (#6): Exige que un objeto aparezca al menos en 3 de los últimos 5 frames
+    Ensemble de frames (#6): Exige que un objeto aparezca al menos en 2 de los últimos 3 frames
     para considerarlo consistente y eliminar falsos positivos parpadeantes.
-    Mejora: usa id_track si está disponible para evitar ghosting entre múltiples objetos.
+    El buffer usa maxlen=3 para mantener baja la latencia en dispositivos móviles.
     """
     init_estado_sesion(session_id)
     estado = estado_sesiones[session_id]
@@ -188,7 +189,7 @@ def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
         
     estado["buffer_historico_frames"].append(objetos_actuales)
     
-    if len(estado["buffer_historico_frames"]) < 3:
+    if len(estado["buffer_historico_frames"]) < 2:
         return detecciones_raw  # Aún no hay suficiente historial
         
     conteo_presencia = Counter()
@@ -196,8 +197,8 @@ def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
         for uid in frame_set:
             conteo_presencia[uid] += 1
             
-    # Solo mantener objetos presentes en al menos 3 de los 5 frames
-    objetos_validos = set(uid for uid, count in conteo_presencia.items() if count >= 3)
+    # Solo mantener objetos presentes en al menos 2 de los 3 frames
+    objetos_validos = set(uid for uid, count in conteo_presencia.items() if count >= 2)
     
     filtradas = []
     for d in detecciones_raw:
@@ -212,7 +213,7 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
     - Preprocesamiento con Auto-rotación (#14) y ROI (#9).
     - Verificación de caché por MSE de frame.
     - Inferencia YOLO con iou=0.45, conf=CONFIANZA_MINIMA, imgsz=640.
-    - Filtro Ensemble de 3 de 5 frames (#6).
+    - Filtro Ensemble de 2 de 3 frames (#6).
     """
     init_estado_sesion(session_id)
     estado = estado_sesiones[session_id]
@@ -262,7 +263,7 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
                 "peligro": es_peligroso
             })
 
-    # Aplicar filtro ensemble (3 de 5 frames) si se solicita
+    # Aplicar filtro ensemble (2 de 3 frames) si se solicita
     if usar_ensemble:
         detecciones = aplicar_filtro_ensemble(detecciones_raw, session_id)
     else:
@@ -300,6 +301,8 @@ def init_db():
         con.execute("ALTER TABLE detecciones ADD COLUMN zona TEXT DEFAULT 'centro'")
     except sqlite3.OperationalError:
         pass
+    con.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON detecciones(session_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON detecciones(timestamp)")
     con.commit()
     con.close()
 
@@ -307,15 +310,41 @@ def init_db():
 init_db()
 
 
+# ─── Batch Writer SQLite (Fix #7: evita 25 writes/sec síncronos) ────────────
+
+_buffer_detecciones = []
+_buffer_lock = threading.Lock()
+
+def _flush_detecciones():
+    """Hilo daemon que flush el buffer de detecciones a SQLite cada 2 segundos."""
+    while True:
+        time.sleep(2)
+        with _buffer_lock:
+            if not _buffer_detecciones:
+                continue
+            lote = list(_buffer_detecciones)
+            _buffer_detecciones.clear()
+        try:
+            con = sqlite3.connect(DB_PATH)
+            con.executemany(
+                "INSERT INTO detecciones (objeto, confianza, timestamp, session_id, zona) VALUES (?, ?, ?, ?, ?)",
+                lote
+            )
+            con.commit()
+            con.close()
+        except Exception as e:
+            print(f"⚠️ Error al flush detecciones: {e}")
+
+_hilo_flush = threading.Thread(target=_flush_detecciones, daemon=True)
+_hilo_flush.start()
+
+
 def guardar_deteccion(objeto: str, confianza: float, session_id: str = "anonimo", zona: str = "centro"):
-    """Inserta una detección en la base de datos asociada a una sesión y zona espacial."""
-    con = sqlite3.connect(DB_PATH)
-    con.execute(
-        "INSERT INTO detecciones (objeto, confianza, timestamp, session_id, zona) VALUES (?, ?, ?, ?, ?)",
-        (objeto, confianza, datetime.now().isoformat(), session_id, zona)
-    )
-    con.commit()
-    con.close()
+    """Encola una detección para escritura en batch (cada 2 segundos)."""
+    with _buffer_lock:
+        _buffer_detecciones.append(
+            (objeto, confianza, datetime.now().isoformat(), session_id, zona)
+        )
 
 
 # ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -335,6 +364,21 @@ def base64_a_imagen(data_url: str) -> np.ndarray:
     return img_cv2
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def serve_index():
+    """Sirve la interfaz principal de VisionVR (index.html)."""
+    return send_file("index.html")
+
+@app.route("/<path:filename>")
+def serve_static(filename):
+    """Sirve archivos estáticos con protección contra path traversal."""
+    EXTENSIONES_PERMITIDAS = {'.html', '.js', '.css', '.png', '.jpg', '.jpeg', '.ico', '.webp', '.svg', '.json', '.webmanifest'}
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in EXTENSIONES_PERMITIDAS:
+        return "Forbidden", 403
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base_dir, filename)
 
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -398,6 +442,8 @@ def handle_connect():
 def handle_disconnect():
     if request.sid in clientes_conectados:
         clientes_conectados.remove(request.sid)
+    if request.sid in estado_sesiones:
+        del estado_sesiones[request.sid]
     print(f"❌ Cliente desconectado: {request.sid}. Total: {len(clientes_conectados)}")
 
 @socketio.on("detectar")
@@ -644,6 +690,6 @@ if __name__ == "__main__":
     print("  Comparte esta IP con María para el frontend")
     import socket
     ip = socket.gethostbyname(socket.gethostname())
-    print(f"  IP en red local: http://{ip}:5000")
+    print(f"  IP en red local: https://{ip}:5000")
     print("="*50 + "\n")
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True, ssl_context='adhoc')

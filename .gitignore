@@ -3,18 +3,22 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 venv/
+
+# Environment variables (API keys)
 .env
+visionvr/.env
 
 # YOLO model weights (large binary, se descarga automáticamente)
 *.pt
+*.onnx
+
+# YOLO training runs
+runs/
 
 # SQLite databases
-**/*.db
+*.db
+db/
 
 # OS
 .DS_Store
 Thumbs.db
-
-visionvr/.env
-*.db
-__pycache__/

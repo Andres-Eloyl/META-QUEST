@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Test Móvil - VisionVR</title>
-    <!-- Cargamos Socket.IO desde CDN para la prueba -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Socket.IO local (modo offline compatible) -->
+    <script src="/js/socket.io.min.js"></script>
     <style>
         body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; }
         /* El video ocupa toda la pantalla */
@@ -70,8 +70,8 @@
                 socket.on('connect', () => {
                     conectado = true;
                     info.innerHTML = 'Conectado al servidor.<br><b style="color:#00ff88;">Toca un cuadro verde</b> para usar la IA.';
-                    // Enviar un frame cada 500ms
-                    setInterval(enviarFrame, 500); 
+                    // Enviar un frame cada 200ms (5 FPS) para mayor rapidez
+                    setInterval(enviarFrame, 200); 
                 });
                 
                 socket.on('detecciones_resultado', (data) => {
@@ -128,8 +128,11 @@
                 offsetX = (canvas.width - drawWidth) / 2;
             }
 
-            const scaleX = drawWidth / video.videoWidth;
-            const scaleY = drawHeight / video.videoHeight;
+            // Fix: Las coordenadas de YOLO vienen del servidor en formato 640x640,
+            // no en la resolución original del video.
+            const YOLO_SIZE = 640;
+            const scaleX = drawWidth / YOLO_SIZE;
+            const scaleY = drawHeight / YOLO_SIZE;
 
             ultimaDeteccion.forEach(det => {
                 const box = det.bbox;
@@ -168,7 +171,7 @@
                     clickX >= det.pantalla.x && clickX <= (det.pantalla.x + det.pantalla.w) &&
                     clickY >= det.pantalla.y && clickY <= (det.pantalla.y + det.pantalla.h)) {
                     
-                    respuestaIa.innerHTML = `<span class="ia-label">Consultando a Groq sobre:</span> ${det.objeto}...`;
+                    respuestaIa.innerHTML = `<span class="ia-label">Consultando a la IA sobre:</span> ${det.objeto}...`;
                     
                     fetch('/explicar', {
                         method: 'POST',
@@ -177,7 +180,7 @@
                     })
                     .then(res => res.json())
                     .then(data => {
-                        respuestaIa.innerHTML = `<span class="ia-label">Llama 3:</span> ${data.explicacion}`;
+                        respuestaIa.innerHTML = `<span class="ia-label">Llama 3 (NVIDIA NIM):</span> ${data.explicacion}`;
                         // Opcional: Hablarlo en voz alta con el teléfono
                         try {
                             const ut = new SpeechSynthesisUtterance(data.explicacion);

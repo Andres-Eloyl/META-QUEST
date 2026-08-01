@@ -7,10 +7,9 @@ Un solo comando arranca todo el proyecto:
 Hace lo siguiente:
   1. Verifica que Python 3.10+ esté instalado
   2. Verifica/instala las dependencias de requirements.txt
-  3. Arranca el backend Flask (Andrés) en el puerto 5000
-  4. Arranca el servidor del frontend (María) en el puerto 8080
-  5. Muestra la IP local para conectar el Quest
-  6. Abre el navegador automáticamente
+  3. Arranca el backend Flask (que también sirve el frontend) en el puerto 5000
+  4. Muestra la IP local para conectar el Quest
+  5. Abre el navegador automáticamente
 """
 
 import sys
@@ -114,12 +113,12 @@ def obtener_ip_local():
     except Exception:
         return socket.gethostbyname(socket.gethostname())
 
-# ─── Arranque de servidores ──────────────────────────────────────────────────
+# ─── Arranque del servidor ───────────────────────────────────────────────────
 
 procesos = []
 
 def arrancar_backend():
-    """Arranca el servidor Flask de Andrés en el puerto 5000."""
+    """Arranca el servidor Flask en el puerto 5000 (sirve backend + frontend)."""
     server_path = os.path.join(os.path.dirname(__file__), "server.py")
     if not os.path.exists(server_path):
         error("No se encontró server.py")
@@ -137,44 +136,12 @@ def arrancar_backend():
     )
     procesos.append(proc)
 
-    # Esperar a que el backend esté listo (buscar el mensaje de "corriendo")
+    # Leer salida del servidor en segundo plano
     def leer_salida():
         for linea in iter(proc.stdout.readline, ''):
             linea = linea.rstrip()
             if linea:
-                print(f"  {Color.DIM}[backend]{Color.RESET} {linea}")
-
-    hilo = threading.Thread(target=leer_salida, daemon=True)
-    hilo.start()
-
-    return proc
-
-def arrancar_frontend():
-    """Arranca un servidor HTTP para el frontend de María en el puerto 8080."""
-    # Verificar que index.html existe
-    index_path = os.path.join(os.path.dirname(__file__), "index.html")
-    if not os.path.exists(index_path):
-        error("No se encontró index.html")
-        sys.exit(1)
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "http.server", "8080"],
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        encoding='utf-8',
-        errors='replace'
-    )
-    procesos.append(proc)
-
-    # Leer salida en segundo plano
-    def leer_salida():
-        for linea in iter(proc.stdout.readline, ''):
-            linea = linea.rstrip()
-            if linea:
-                print(f"  {Color.DIM}[frontend]{Color.RESET} {linea}")
+                print(f"  {Color.DIM}[server]{Color.RESET} {linea}")
 
     hilo = threading.Thread(target=leer_salida, daemon=True)
     hilo.start()
@@ -182,15 +149,15 @@ def arrancar_frontend():
     return proc
 
 def limpiar(*args):
-    """Detiene ambos servidores al salir."""
-    print(f"\n{Color.AMARILLO}Apagando servidores...{Color.RESET}")
+    """Detiene los servidores al salir."""
+    print(f"\n{Color.AMARILLO}Apagando servidor...{Color.RESET}")
     for proc in procesos:
         try:
             proc.terminate()
             proc.wait(timeout=3)
         except Exception:
             proc.kill()
-    ok("Servidores detenidos")
+    ok("Servidor detenido")
     sys.exit(0)
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -216,45 +183,40 @@ def main():
     signal.signal(signal.SIGINT, limpiar)
     signal.signal(signal.SIGTERM, limpiar)
 
-    # Paso 2: Arrancar backend
-    info("Arrancando backend (Flask + YOLO) en puerto 5000...")
+    # Paso 2: Arrancar servidor (Flask sirve backend + frontend)
+    info("Arrancando servidor VisionVR (Flask + YOLO) en puerto 5000...")
     arrancar_backend()
 
     # Dar tiempo al backend para cargar el modelo YOLO
-    time.sleep(3)
+    time.sleep(4)
 
-    # Paso 3: Arrancar frontend
-    info("Arrancando frontend (HTTP) en puerto 8080...")
-    arrancar_frontend()
-    time.sleep(1)
-
-    # Paso 4: Mostrar resumen
+    # Paso 3: Mostrar resumen
     print()
     print(f"  {Color.BOLD}{Color.VERDE}============================================{Color.RESET}")
-    print(f"  {Color.BOLD}{Color.VERDE}       [OK] Todo corriendo                 {Color.RESET}")
+    print(f"  {Color.BOLD}{Color.VERDE}       [OK] Servidor corriendo             {Color.RESET}")
     print(f"  {Color.BOLD}{Color.VERDE}============================================{Color.RESET}")
     print()
-    print(f"  {Color.BOLD}Backend  (Andres):{Color.RESET}  http://localhost:5000")
-    print(f"  {Color.BOLD}Frontend (Maria):{Color.RESET}   http://localhost:8080")
+    print(f"  {Color.BOLD}Frontend + Backend:{Color.RESET}  https://localhost:5000")
+    print(f"  {Color.BOLD}Dashboard:{Color.RESET}           https://localhost:5000/dashboard")
+    print(f"  {Color.BOLD}Vista Móvil:{Color.RESET}         https://localhost:5000/movil")
     print()
     print(f"  {Color.BOLD}{Color.CYAN}--- Para el Meta Quest 3 ---{Color.RESET}")
-    print(f"  {Color.BOLD}Abre en el Quest:{Color.RESET}   http://{ip}:8080")
-    print(f"  {Color.BOLD}IP del servidor:{Color.RESET}    http://{ip}:5000")
-    print(f"  {Color.DIM}(escribe esa IP en el campo del frontend){Color.RESET}")
+    print(f"  {Color.BOLD}Abre en el Quest:{Color.RESET}    https://{ip}:5000")
+    print(f"  {Color.DIM}(usa esa misma IP en el campo del frontend){Color.RESET}")
     print()
-    print(f"  {Color.DIM}Presiona Ctrl+C para detener ambos servidores{Color.RESET}")
+    print(f"  {Color.DIM}Presiona Ctrl+C para detener el servidor{Color.RESET}")
     print()
 
-    # Paso 5: Abrir navegador
-    webbrowser.open(f"http://localhost:8080")
+    # Paso 4: Abrir navegador
+    webbrowser.open(f"https://localhost:5000")
 
     # Mantener vivo hasta Ctrl+C
     try:
         while True:
-            # Verificar que los procesos siguen vivos
+            # Verificar que el proceso sigue vivo
             for proc in procesos:
                 if proc.poll() is not None:
-                    error(f"Un servidor se detuvo inesperadamente (código: {proc.returncode})")
+                    error(f"El servidor se detuvo inesperadamente (código: {proc.returncode})")
                     limpiar()
             time.sleep(2)
     except KeyboardInterrupt:

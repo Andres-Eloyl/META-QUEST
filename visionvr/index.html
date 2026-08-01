@@ -21,113 +21,251 @@
       overflow: hidden;
     }
 
-    /* ─── Panel de configuración (barra superior) ──────────────────────── */
+    /* ─── Panel de configuración (Overlay Centrado Lovable) ──────────── */
     #panel-config {
       position: fixed;
       top: 0;
       left: 0;
       right: 0;
+      bottom: 0;
       z-index: 9999;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      border-bottom: 2px solid #00ff88;
-      padding: 16px 24px;
+      background: radial-gradient(circle at top left, rgba(0, 255, 136, 0.05), transparent 40%),
+                  radial-gradient(circle at bottom right, rgba(0, 255, 136, 0.05), transparent 40%),
+                  #070a10; /* Very dark background */
       display: flex;
       align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-      box-shadow: 0 4px 30px rgba(0, 255, 136, 0.15);
-      backdrop-filter: blur(10px);
+      justify-content: center;
       transition: opacity 0.5s ease, transform 0.5s ease;
+      backdrop-filter: blur(10px);
+    }
+    
+    .panel-config-card {
+      background: #0f131a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 32px 40px;
+      width: 420px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
 
+    /* Ocultar el panel */
     #panel-config.oculto {
       opacity: 0;
-      transform: translateY(-100%);
+      transform: scale(0.95);
       pointer-events: none;
     }
 
-    #panel-config h1 {
-      font-size: 1.2rem;
-      font-weight: 700;
-      color: #00ff88;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      white-space: nowrap;
+    .panel-header {
+      text-align: center;
+      margin-bottom: 24px;
     }
 
-    #panel-config label {
+    .panel-header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    
+    .panel-header h1 span {
+      color: #00ff88;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      display: block;
+      margin-top: 4px;
+    }
+
+    .panel-header p {
+      color: #8b949e;
       font-size: 0.85rem;
-      color: #a0a0b0;
-      white-space: nowrap;
+      margin-top: 8px;
+    }
+
+    .input-group {
+      width: 100%;
+      margin-bottom: 24px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-wrapper svg {
+      position: absolute;
+      left: 12px;
+      width: 16px;
+      height: 16px;
+      fill: #8b949e;
     }
 
     #input-ip {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      width: 100%;
+      background: #161b22;
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 8px;
-      padding: 10px 14px;
+      padding: 12px 12px 12px 36px;
       color: #fff;
       font-size: 0.95rem;
-      width: 260px;
       outline: none;
-      transition: border-color 0.3s, box-shadow 0.3s;
+      transition: all 0.2s;
     }
 
     #input-ip:focus {
       border-color: #00ff88;
-      box-shadow: 0 0 12px rgba(0, 255, 136, 0.3);
+      box-shadow: 0 0 0 1px #00ff88;
     }
 
     #btn-conectar {
-      background: linear-gradient(135deg, #00ff88, #00cc6a);
-      color: #0a0a0f;
+      width: 100%;
+      background: #00ff88;
+      color: #000;
       border: none;
       border-radius: 8px;
-      padding: 10px 24px;
-      font-size: 0.95rem;
+      padding: 14px;
+      font-size: 1rem;
       font-weight: 700;
       cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 1px;
+      transition: all 0.3s;
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+      margin-bottom: 20px;
     }
 
     #btn-conectar:hover {
       transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(0, 255, 136, 0.4);
+      box-shadow: 0 0 30px rgba(0, 255, 136, 0.6);
+      background: #00cc6a;
     }
 
     #btn-conectar:active {
       transform: translateY(0);
     }
-
+    
     #btn-conectar:disabled {
-      background: #555;
-      color: #999;
+      background: #333;
+      color: #666;
+      box-shadow: none;
       cursor: not-allowed;
       transform: none;
-      box-shadow: none;
+    }
+
+    .options-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+
+    .demo-toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #8b949e;
+      font-size: 0.9rem;
+    }
+    
+    .demo-toggle-container svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    /* Toggle Switch CSS */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #30363d;
+      transition: .4s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #00ff88;
+    }
+    input:checked + .slider:before {
+      transform: translateX(16px);
+      background-color: #000;
+    }
+
+    .status-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #8b949e;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #ff4444;
+      box-shadow: 0 0 8px rgba(255, 68, 68, 0.6);
+      transition: all 0.3s;
     }
 
     #estado {
-      font-size: 0.9rem;
-      padding: 6px 14px;
-      border-radius: 20px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.85rem;
       transition: all 0.3s;
-      white-space: nowrap;
     }
-
+    
     #estado.conectado {
-      background: rgba(0, 255, 136, 0.12);
-      border-color: #00ff88;
       color: #00ff88;
     }
-
     #estado.error {
-      background: rgba(255, 68, 68, 0.12);
-      border-color: #ff4444;
       color: #ff4444;
     }
 
@@ -199,17 +337,38 @@
 
   <!-- ═══ SECCIÓN 1: Panel de Configuración ═══════════════════════════════ -->
   <div id="panel-config">
-    <h1>🔬 VisionVR</h1>
-    <label for="input-ip">IP del servidor:</label>
-    <input
-      type="text"
-      id="input-ip"
-      placeholder="http://192.168.1.105:5000"
-      value="http://localhost:5000"
-    >
-    <button id="btn-conectar" onclick="conectar()">Conectar</button>
-    <button id="btn-demo" style="background: rgba(0,216,255,0.2); border: 1px solid #00d8ff; color: #00d8ff; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer;" onclick="toggleModoDemo()">❄ Modo Demo</button>
-    <span id="estado">⏸ Desconectado</span>
+    <div class="panel-config-card">
+      <div class="panel-header">
+        <h1>◲ VisionVR<br><span>Setup</span></h1>
+        <p>Configure your session before entering VR.</p>
+      </div>
+
+      <div class="input-group">
+        <label for="input-ip">SERVER IP ADDRESS</label>
+        <div class="input-wrapper">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          <input type="text" id="input-ip" value="http://localhost:5000">
+        </div>
+      </div>
+
+      <button id="btn-conectar" onclick="conectar()">CONNECT TO SERVER</button>
+
+      <div class="options-row">
+        <div class="demo-toggle-container">
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          Demo Mode
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="btn-demo-toggle" onchange="toggleModoDemo()">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="status-container">
+        <div id="status-dot" class="status-dot"></div>
+        <span id="estado">Disconnected</span>
+      </div>
+    </div>
   </div>
 
   <!-- ═══ Panel de estadísticas 2D (fuera de VR) ═════════════════════════ -->
@@ -472,6 +631,13 @@
     let lastFrameTime = performance.now();
     let fpsActual = 0;
 
+    // ─── Captura de cámara real (Fix: passthrough no se captura del canvas A-Frame) ──
+    let cameraStream = null;
+    let cameraVideo = null;
+    let cameraCanvas = null;
+    let cameraCtx = null;
+    const YOLO_SIZE = 640; // Resolución de inferencia del modelo
+
     // Web Audio API para sonidos (Detección y Alerta de Peligro)
     let audioCtx = null;
     function reproducirSonidoDeteccion() {
@@ -557,18 +723,12 @@
 
     // ─── Modo Demo Toggle ────────────────────────────────────────────────
     function toggleModoDemo() {
-      modoDemo = !modoDemo;
-      const btnDemo = document.getElementById('btn-demo');
+      modoDemo = document.getElementById('btn-demo-toggle').checked;
       if (modoDemo) {
-        btnDemo.style.background = '#00d8ff';
-        btnDemo.style.color = '#0a0a0f';
-        btnDemo.textContent = '❄ Modo Demo (CONGELADO)';
-        mostrarEstado('❄ Modo Demo Activo — Detección Congelada', 'conectado');
+        mostrarEstado('Demo Mode Active', 'conectado');
       } else {
-        btnDemo.style.background = 'rgba(0,216,255,0.2)';
-        btnDemo.style.color = '#00d8ff';
-        btnDemo.textContent = '❄ Modo Demo';
-        if (conectado) mostrarEstado('✓ Conectado — iniciando detección', 'conectado');
+        if (conectado) mostrarEstado('Connected', 'conectado');
+        else mostrarEstado('Disconnected', '');
       }
     }
 
@@ -706,16 +866,56 @@
     function mostrarEstado(texto, clase) {
       elEstado.textContent = texto;
       elEstado.className = clase || '';
+      const dot = document.getElementById('status-dot');
+      if (dot) {
+          if (clase === 'conectado') {
+              dot.style.backgroundColor = '#00ff88';
+              dot.style.boxShadow = '0 0 8px rgba(0, 255, 136, 0.6)';
+          } else if (clase === 'error') {
+              dot.style.backgroundColor = '#ff4444';
+              dot.style.boxShadow = '0 0 8px rgba(255, 68, 68, 0.6)';
+          } else {
+              if (texto.includes('Conectando') || texto.includes('Connecting')) {
+                  dot.style.backgroundColor = '#ffcc00';
+                  dot.style.boxShadow = '0 0 8px rgba(255, 204, 0, 0.6)';
+              } else {
+                  dot.style.backgroundColor = '#ff4444';
+                  dot.style.boxShadow = '0 0 8px rgba(255, 68, 68, 0.6)';
+              }
+          }
+      }
     }
 
     // ─── Captura de frames ────────────────────────────────────────────────
-    function iniciarCaptura() {
+    async function iniciarCaptura() {
       if (intervaloCaptura) clearInterval(intervaloCaptura);
+
+      // Intentar abrir la cámara real del dispositivo (passthrough del Quest)
+      // El canvas de A-Frame solo renderiza la escena 3D, NO captura el passthrough.
+      if (!cameraStream) {
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+          cameraVideo = document.createElement('video');
+          cameraVideo.srcObject = cameraStream;
+          cameraVideo.setAttribute('playsinline', '');
+          cameraVideo.muted = true;
+          await cameraVideo.play();
+
+          cameraCanvas = document.createElement('canvas');
+          cameraCtx = cameraCanvas.getContext('2d');
+          console.log('📷 Cámara real activada para captura de frames');
+        } catch (err) {
+          console.warn('⚠️ No se pudo acceder a la cámara real, usando canvas A-Frame como fallback:', err.message);
+          cameraStream = null;
+        }
+      }
 
       intervaloCaptura = setInterval(() => {
         if (!conectado || enviando) return;
         capturarYEnviar();
-      }, 500); // 2 FPS
+      }, 200); // 5 FPS
     }
 
     function capturarYEnviar() {
@@ -726,13 +926,24 @@
       enviando = true;
 
       try {
-        const canvas = escena.canvas;
-        if (!canvas) {
-          enviando = false;
-          return;
+        let base64;
+
+        if (cameraVideo && cameraVideo.readyState >= 2 && cameraCanvas) {
+          // Usar la cámara real del dispositivo (passthrough)
+          cameraCanvas.width = cameraVideo.videoWidth;
+          cameraCanvas.height = cameraVideo.videoHeight;
+          cameraCtx.drawImage(cameraVideo, 0, 0);
+          base64 = cameraCanvas.toDataURL('image/jpeg', 0.7);
+        } else {
+          // Fallback: capturar del canvas A-Frame (funciona en escritorio)
+          const canvas = escena.canvas;
+          if (!canvas) {
+            enviando = false;
+            return;
+          }
+          base64 = canvas.toDataURL('image/jpeg', 0.7);
         }
 
-        const base64 = canvas.toDataURL('image/jpeg', 0.7);
         socket.emit("detectar", { imagen: base64 });
 
       } catch (err) {
@@ -811,8 +1022,10 @@
       if (deteccion.bbox) {
         const cx = deteccion.bbox.x + deteccion.bbox.w / 2;
         const cy = deteccion.bbox.y + deteccion.bbox.h / 2;
-        const ndcX = (cx / window.innerWidth) * 2 - 1;
-        const ndcY = -((cy / window.innerHeight) * 2 - 1);
+        // Fix #2: Usar YOLO_SIZE (640) en vez de window dimensions.
+        // YOLO siempre infiere a 640x640, las coordenadas bbox están en ese espacio.
+        const ndcX = (cx / YOLO_SIZE) * 2 - 1;
+        const ndcY = -((cy / YOLO_SIZE) * 2 - 1);
         x = ndcX * 2.5; 
         y = ndcY * 1.5; 
         z = -2; // Default si no hay lectura de profundidad
@@ -822,8 +1035,9 @@
             try {
                 const depthW = window.lastDepthInfo.width;
                 const depthH = window.lastDepthInfo.height;
-                const dX = Math.floor((cx / window.innerWidth) * depthW);
-                const dY = Math.floor((cy / window.innerHeight) * depthH);
+                // Mapear coordenadas YOLO (640x640) al espacio del depth sensor
+                const dX = Math.floor((cx / YOLO_SIZE) * depthW);
+                const dY = Math.floor((cy / YOLO_SIZE) * depthH);
                 
                 if (dX >= 0 && dX < depthW && dY >= 0 && dY < depthH) {
                     const profMts = window.lastDepthInfo.getDepthInMeters(dX, dY);
