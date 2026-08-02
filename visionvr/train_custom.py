@@ -38,10 +38,10 @@ def main():
         return
 
     print(f"\n✅ Dataset detectado en: {dataset_yaml}")
-    print("⏳ Cargando modelo base YOLOv8n (rápido)...")
+    print("⏳ Cargando modelo base YOLOv8x (Mega Preciso pero más lento)...")
     
-    # 2. Cargar el modelo pre-entrenado base (nano)
-    modelo = YOLO("yolov8n.pt")
+    # 2. Cargar el modelo pre-entrenado base (Extra Large)
+    modelo = YOLO("yolov8x.pt")
     
     print("\n🚀 ¡Iniciando entrenamiento! (Esto puede tardar un buen rato...)")
     print("Puedes cancelar en cualquier momento con Ctrl+C.\n")
@@ -53,9 +53,9 @@ def main():
     # device: 'cpu' si no tienes tarjeta gráfica NVIDIA. Si tienes, pon '0' o quita el parámetro.
     resultados = modelo.train(
         data=dataset_yaml,
-        epochs=10,        # <- Cambia a 30 o 50 cuando quieras el modelo final
-        imgsz=640,
-        batch=8,
+        epochs=100,       # <- Aumentado a 100 para máxima precisión
+        imgsz=800,        # <- Aumentado a 800 para detectar objetos más pequeños/lejanos
+        batch=4,          # <- Reducido a 4 porque el modelo X usa mucha RAM
         name="visionvr_entrenamiento"
     )
     

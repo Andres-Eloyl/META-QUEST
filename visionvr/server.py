@@ -38,7 +38,7 @@ print(f"⚡ Hilos CPU PyTorch optimizados a: {num_cpus}")
 
 # Modelo YOLO & ONNX
 CUSTOM_MODEL_PATH = "visionvr_custom.pt"
-DEFAULT_MODEL_PATH = "yolov8m.pt"
+DEFAULT_MODEL_PATH = "yolov8x.pt"  # <-- MEGA PRECISO (Extra Large)
 
 if os.path.exists(CUSTOM_MODEL_PATH):
     BASE_MODEL_PATH = CUSTOM_MODEL_PATH
@@ -47,7 +47,7 @@ else:
     BASE_MODEL_PATH = DEFAULT_MODEL_PATH
     print(f"Usando modelo genérico por defecto: {BASE_MODEL_PATH}")
 
-CONFIANZA_MINIMA = 0.5   # Filtra detecciones con menos del 50% de confianza
+CONFIANZA_MINIMA = 0.60  # Balance ideal: Filtra detecciones dudosas pero mantiene alta visibilidad
 DB_PATH = "db/sesion.db"
 
 # ─── Estado Multi-Usuario ─────────────────────────────────────────────────────
@@ -596,8 +596,8 @@ from dotenv import load_dotenv
 
 load_dotenv() # Cargar API key de .env
 cliente_ia = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=os.environ.get("NVIDIA_API_KEY")
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.environ.get("GROQ_API_KEY")
 )
 
 @app.route("/explicar", methods=["POST"])
@@ -611,7 +611,7 @@ def explicar():
 
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="meta/llama-3.1-70b-instruct",
+            model="llama-3.1-70b-versatile",
             messages=[{
                 "role": "user",
                 "content": (
@@ -626,8 +626,8 @@ def explicar():
         texto = respuesta.choices[0].message.content.strip()
         return jsonify({"explicacion": texto})
     except Exception as e:
-        print("Error en NVIDIA API:", e)
-        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA de NVIDIA."}), 500
+        print("Error en Groq API:", e)
+        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA de Groq."}), 500
 
 
 @app.route("/analizar_escena", methods=["POST"])
@@ -644,7 +644,7 @@ def analizar_escena():
     lista_str = ", ".join(list(set(objetos)))
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="meta/llama-3.1-70b-instruct",
+            model="llama-3.1-70b-versatile",
             messages=[{
                 "role": "user",
                 "content": (
@@ -659,7 +659,7 @@ def analizar_escena():
         resumen = respuesta.choices[0].message.content.strip()
         return jsonify({"resumen": resumen})
     except Exception as e:
-        print("Error en analizar_escena NVIDIA:", e)
+        print("Error en analizar_escena Groq:", e)
         return jsonify({"resumen": f"Objetos visibles en escena: {lista_str}."})
 
 

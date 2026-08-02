@@ -6,31 +6,171 @@
     <title>Test Móvil - VisionVR</title>
     <!-- Socket.IO local (modo offline compatible) -->
     <script src="/js/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; padding: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; }
-        /* El video ocupa toda la pantalla */
-        #video-bg { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
-        /* El canvas se dibuja encima para los recuadros */
+        :root {
+            --vinotinto: #5b1e31;
+            --vinotinto-dark: #3a101e;
+            --vinotinto-light: #7a2841;
+            --cream: #fdfbf7;
+            --gold: #d4af37;
+        }
+
+        body { 
+            margin: 0; padding: 0; 
+            background-color: var(--cream);
+            color: #1a1a1a; 
+            font-family: 'Outfit', sans-serif; 
+            overflow: hidden; 
+        }
+        
+        /* Background Animations */
+        @keyframes orb-drift {
+            0% { transform: translate3d(0, 0, 0) scale(1); }
+            33% { transform: translate3d(6%, -8%, 0) scale(1.12); }
+            66% { transform: translate3d(-7%, 6%, 0) scale(0.94); }
+            100% { transform: translate3d(0, 0, 0) scale(1); }
+        }
+        @keyframes aurora-pan {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        @keyframes grid-slide {
+            from { background-position: 0 0; }
+            to { background-position: 0 -56px; }
+        }
+        
+        .ambient-bg {
+            position: absolute; inset: 0; overflow: hidden; z-index: 0; pointer-events: none;
+            transition: opacity 1s ease;
+        }
+        .aurora-layer {
+            position: absolute; inset: 0;
+            background: linear-gradient(115deg, rgba(91,30,49,0.16) 16%, transparent 35%, rgba(212,175,55,0.12) 55%, transparent 75%, rgba(122,40,65,0.18));
+            background-size: 300% 300%;
+            animation: aurora-pan 22s ease-in-out infinite;
+        }
+        .grid-veil {
+            position: absolute; inset: 0; opacity: 0.7;
+            background-image: linear-gradient(rgba(91,30,49,0.09) 1px, transparent 1px), linear-gradient(90deg, rgba(91,30,49,0.09) 1px, transparent 1px);
+            background-size: 56px 56px;
+            animation: grid-slide 14s linear infinite;
+            mask-image: radial-gradient(ellipse at center, black 10%, transparent 72%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 10%, transparent 72%);
+        }
+        .orb {
+            position: absolute; border-radius: 50%; filter: blur(70px);
+            animation: orb-drift 18s ease-in-out infinite;
+        }
+
+        /* Video Layer */
+        #video-bg { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; opacity: 0; transition: opacity 1s ease; }
         #canvas-overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
-        /* Para capturar los toques (clicks), ponemos un div interactivo encima */
         #touch-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 3; }
         
-        #ui { position: absolute; bottom: 30px; left: 20px; right: 20px; z-index: 4; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 12px; border: 1px solid #00ff88; backdrop-filter: blur(5px); }
-        button { padding: 12px 20px; font-size: 16px; font-weight: bold; background: #00ff88; color: #000; border: none; border-radius: 8px; cursor: pointer; width: 100%; text-transform: uppercase; }
-        #info { margin-top: 10px; font-size: 14px; color: #ccc; text-align: center; }
-        #respuesta-ia { margin-top: 15px; color: #fff; font-size: 15px; line-height: 1.4; border-top: 1px solid #333; padding-top: 10px; }
-        .ia-label { color: #00d8ff; font-weight: bold; }
+        /* UI Card */
+        #ui { 
+            position: absolute; 
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 90%; max-width: 420px;
+            z-index: 4; 
+            background: rgba(255, 255, 255, 0.85); 
+            border-radius: 24px; 
+            border: 1px solid rgba(91, 30, 49, 0.15); 
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 30px 80px -30px rgba(91, 30, 49, 0.45);
+            transition: all 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+            overflow: hidden;
+        }
+
+        /* UI Header */
+        .ui-header {
+            position: relative;
+            background: linear-gradient(to bottom right, var(--vinotinto), var(--vinotinto-dark));
+            padding: 28px 32px;
+            color: var(--cream);
+            border-bottom: 1px solid rgba(0,0,0,0.2);
+        }
+        .ui-header-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2em; color: rgba(253, 251, 247, 0.8);
+        }
+        .glow-dot { width: 8px; height: 8px; background: var(--gold); border-radius: 50%; box-shadow: 0 0 10px var(--gold); }
+        .ui-header h1 { margin: 12px 0 4px 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; }
+        .ui-header p { margin: 0; font-size: 14px; font-weight: 300; opacity: 0.7; }
+
+        /* UI Body */
+        .ui-body { padding: 32px; }
+        
+        .input-group { margin-bottom: 24px; text-align: left; }
+        .input-group label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.15em; color: #666; margin-bottom: 8px; }
+        .input-group input { 
+            width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid #ddd; 
+            background: rgba(0,0,0,0.03); font-family: monospace; font-size: 14px; box-sizing: border-box;
+            color: #555; pointer-events: none; /* Auto-filled */
+        }
+
+        button { 
+            position: relative; overflow: hidden;
+            padding: 14px 20px; font-size: 14px; font-weight: 600; 
+            background: var(--vinotinto); color: var(--cream); 
+            border: none; border-radius: 12px; cursor: pointer; 
+            width: 100%; text-transform: uppercase; letter-spacing: 0.12em;
+            box-shadow: 0 14px 34px -12px rgba(91, 30, 49, 0.85);
+            transition: all 0.3s;
+        }
+        button:hover { transform: translateY(-2px); background: var(--vinotinto-light); box-shadow: 0 20px 44px -12px rgba(91, 30, 49, 0.95); }
+        button:active { transform: translateY(0); }
+
+        /* Active Mode (Camera On) */
+        #ui.active-mode {
+            top: auto; bottom: 30px; left: 20px; right: 20px;
+            transform: translate(0, 0); width: auto; max-width: none;
+            background: rgba(15, 25, 20, 0.75);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 16px;
+        }
+        #ui.active-mode .ui-header, #ui.active-mode .input-group, #ui.active-mode button { display: none; }
+        #ui.active-mode .ui-body { padding: 15px; }
+        
+        #info { font-size: 15px; color: #a3c4b5; font-weight: 300; display: none; text-align: center; }
+        #ui.active-mode #info { display: block; }
+        
+        #respuesta-ia { margin-top: 10px; color: #fff; font-size: 16px; line-height: 1.5; font-weight: 300; display: none; text-align: left; }
+        #ui.active-mode #respuesta-ia { display: block; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; }
+        .ia-label { color: #00ff88; font-weight: 500; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 4px;}
+
     </style>
 </head>
 <body>
+    <div class="ambient-bg" id="ambient-bg">
+        <div class="aurora-layer"></div>
+        <div class="grid-veil"></div>
+        <div class="orb" style="top: -10%; left: -24px; width: 400px; height: 400px; background: rgba(91,30,49,0.25);"></div>
+        <div class="orb" style="bottom: -15%; right: -28px; width: 480px; height: 480px; background: rgba(58,16,30,0.25); animation-delay: -6s;"></div>
+        <div class="orb" style="top: 33%; left: 50%; width: 280px; height: 280px; background: rgba(212,175,55,0.15); animation-delay: -11s;"></div>
+    </div>
+
     <video id="video-bg" autoplay playsinline></video>
     <canvas id="canvas-overlay"></canvas>
     <div id="touch-layer"></div>
     
     <div id="ui">
-        <button id="btn-iniciar" onclick="iniciar()">Activar Cámara</button>
-        <div id="info">Presiona el botón para comenzar.</div>
-        <div id="respuesta-ia"></div>
+        <div class="ui-header">
+            <div class="ui-header-badge"><span class="glow-dot"></span> Setup</div>
+            <h1>Configure your session</h1>
+            <p>Prepare your environment before entering VR.</p>
+        </div>
+        <div class="ui-body">
+            <div class="input-group">
+                <label>Server Address</label>
+                <input type="text" id="ip-display" value="Auto-detecting..." readonly>
+            </div>
+            <button id="btn-iniciar" onclick="iniciar()">Connect to Server</button>
+            <div id="info">Presiona el botón para comenzar a detectar el mundo que te rodea.</div>
+            <div id="respuesta-ia"></div>
+        </div>
     </div>
 
     <script>
@@ -41,11 +181,18 @@
         const btnIniciar = document.getElementById('btn-iniciar');
         const info = document.getElementById('info');
         const respuestaIa = document.getElementById('respuesta-ia');
+        const ipDisplay = document.getElementById('ip-display');
+        const ambientBg = document.getElementById('ambient-bg');
         
         let socket;
         let conectado = false;
         let enviando = false;
         let ultimaDeteccion = [];
+
+        // Auto-detect IP
+        if (ipDisplay) {
+            ipDisplay.value = window.location.host || '127.0.0.1:5000';
+        }
 
         function ajustarCanvas() {
             canvas.width = window.innerWidth;
@@ -59,6 +206,11 @@
                 // Solicitar cámara trasera
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
+                
+                // Efecto de transición suave para el video y el UI
+                video.style.opacity = "1";
+                if(ambientBg) ambientBg.style.opacity = "0"; // Fade out ambient
+                document.getElementById('ui').classList.add('active-mode');
                 btnIniciar.style.display = 'none';
                 
                 // Conectar al servidor local usando la IP en la URL actual
@@ -180,7 +332,7 @@
                     })
                     .then(res => res.json())
                     .then(data => {
-                        respuestaIa.innerHTML = `<span class="ia-label">Llama 3 (NVIDIA NIM):</span> ${data.explicacion}`;
+                        respuestaIa.innerHTML = `<span class="ia-label">Groq (Llama 3.1):</span> ${data.explicacion}`;
                         // Opcional: Hablarlo en voz alta con el teléfono
                         try {
                             const ut = new SpeechSynthesisUtterance(data.explicacion);

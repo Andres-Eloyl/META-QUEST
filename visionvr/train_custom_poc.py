@@ -6,9 +6,9 @@ print("==================================================")
 print("  🤖 INICIANDO ENTRENAMIENTO DE IA (Prueba Rápida)")
 print("==================================================")
 
-# 1. Cargamos un modelo pre-entrenado muy ligero (Nano) para que sea rápido
-print("\n[1/3] Cargando arquitectura base (yolov8n.pt)...")
-modelo = YOLO("yolov8n.pt")
+# 1. Cargamos un modelo pre-entrenado más robusto (Large) para mayor precisión
+print("\n[1/3] Cargando arquitectura base (yolov8l.pt)...")
+modelo = YOLO("yolov8l.pt")
 
 # 2. Entrenamos el modelo
 # Para este ejemplo, usamos 'coco8.yaml', que es un dataset minúsculo que 
@@ -20,8 +20,8 @@ print("      (Configurado a solo 5 iteraciones/epochs para la prueba)")
 # Entrenar (en un caso real, cambiaríamos coco8.yaml por tu_dataset_robotica.yaml)
 modelo.train(
     data="coco8.yaml",
-    epochs=5,           # 5 pasadas de aprendizaje
-    imgsz=320,          # Resolución baja para entrenar rápido en CPU
+    epochs=5,           # 5 pasadas de aprendizaje (sólo para prueba rápida)
+    imgsz=640,          # Resolución estándar para mejorar la precisión (antes 320)
     batch=2,            # Imágenes por lote
     name="entrenamiento_lab",
     verbose=False       # Ocultar exceso de logs
