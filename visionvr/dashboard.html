@@ -461,10 +461,12 @@
             document.getElementById('btn-tema').textContent = esOscuro ? '☀️ Tema Claro' : '🌙 Tema Oscuro';
         }
 
+        // Set default IP to current origin to avoid HTTP/HTTPS mixed content errors
+        document.getElementById('server-ip').value = window.location.origin;
+
         // Iniciar ciclo de actualización cada 2 segundos
         setInterval(fetchStats, 2000);
         fetchStats();
-
 
     </script>
 </body>
