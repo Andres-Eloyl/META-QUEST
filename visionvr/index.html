@@ -894,34 +894,11 @@
 
     // ─── Captura de frames ────────────────────────────────────────────────
     async function iniciarCaptura() {
-      if (intervaloCaptura) clearInterval(intervaloCaptura);
-
-      // Intentar abrir la cámara real del dispositivo (passthrough del Quest)
-      // El canvas de A-Frame solo renderiza la escena 3D, NO captura el passthrough.
-      if (!cameraStream) {
-        try {
-          cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
-          });
-          cameraVideo = document.createElement('video');
-          cameraVideo.srcObject = cameraStream;
-          cameraVideo.setAttribute('playsinline', '');
-          cameraVideo.muted = true;
-          await cameraVideo.play();
-
-          cameraCanvas = document.createElement('canvas');
-          cameraCtx = cameraCanvas.getContext('2d');
-          console.log('📷 Cámara real activada para captura de frames');
-        } catch (err) {
-          console.warn('⚠️ No se pudo acceder a la cámara real, usando canvas A-Frame como fallback:', err.message);
-          cameraStream = null;
-        }
-      }
-
-      intervaloCaptura = setInterval(() => {
-        if (!conectado || enviando) return;
-        capturarYEnviar();
-      }, 200); // 5 FPS
+      // FIX: En VisionVR, el visor (index.html) actúa únicamente como RECEPTOR.
+      // La cámara real se captura desde el celular (/movil).
+      // Evitamos intentar capturar la webcam de la PC para no interferir con las detecciones del celular.
+      console.log('Modo Híbrido: index.html actúa como receptor. No se enviarán frames desde este dispositivo.');
+      cameraStream = null;
     }
 
     function capturarYEnviar() {
