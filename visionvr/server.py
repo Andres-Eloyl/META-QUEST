@@ -254,9 +254,6 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
     img = preprocesar_imagen(img_raw, solo_roi=solo_roi)
     cached_dets, es_cache = obtener_detecciones_cache(img, session_id)
     if es_cache and cached_dets is not None:
-        # BUG FIX: Guardar las detecciones cacheadas en la DB para no perder la continuidad
-        for d in cached_dets:
-            guardar_deteccion(d["objeto"], d["confianza"], session_id, d["zona"])
         return cached_dets, 5, True
         
     inicio = time.time()
@@ -302,8 +299,12 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
     else:
         detecciones = detecciones_raw
 
-    for d in detecciones:
-        guardar_deteccion(d["objeto"], d["confianza"], session_id, d["zona"])
+    # Rate limit: Guardar en base de datos solo 1 vez por segundo por sesión
+    ahora = time.time()
+    if ahora - estado.get("ultimo_guardado_db", 0) > 1.0:
+        for d in detecciones:
+            guardar_deteccion(d["objeto"], d["confianza"], session_id=session_id, zona=d["zona"])
+        estado["ultimo_guardado_db"] = ahora
             
     estado["ultimas_detecciones_cache"] = detecciones
     return detecciones, tiempo_ms, False
@@ -466,7 +467,7 @@ def detectar():
             return jsonify({"error": "No se pudo decodificar la imagen"}), 400
 
         usar_tracking = len(clientes_conectados) <= 1
-        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id="anonimo")
+        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id="anonimo", usar_ensemble=False)
 
         return jsonify({
             "detecciones": detecciones,
@@ -511,7 +512,7 @@ def handle_detectar(datos):
             return
 
         usar_tracking = len(clientes_conectados) <= 1
-        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id=session_id)
+        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id=session_id, usar_ensemble=False)
 
         socketio.emit("detecciones_resultado", {
             "detecciones": detecciones,
