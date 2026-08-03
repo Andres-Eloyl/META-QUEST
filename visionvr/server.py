@@ -671,6 +671,10 @@ def explicar():
             max_tokens=100
         )
         texto = respuesta.choices[0].message.content.strip()
+        
+        # Compartir la explicación con todos los clientes (ej. las gafas VR)
+        socketio.emit("explicacion_resultado", {"objeto": objeto, "texto": texto})
+        
         return jsonify({"explicacion": texto})
     except Exception as e:
         print("⚠️ Error en NVIDIA API:", e)

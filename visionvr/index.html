@@ -844,6 +844,12 @@
 
         actualizarEstadisticas();
       });
+
+      socket.on('explicacion_resultado', (data) => {
+        mostrarEstado(`IA: ${data.objeto} explicado`, 'conectado');
+        mostrarExplicacionVR(`[${data.objeto}] ${data.texto}`);
+        hablar(data.texto);
+      });
     }
 
     function manejarDesconexion(motivo) {
