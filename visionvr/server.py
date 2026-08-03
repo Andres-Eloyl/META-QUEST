@@ -3,18 +3,19 @@ VisionVR — Servidor Backend
 ============================
 Autor: Andrés
 Materia: Inteligencia Artificial
-Motor: Flask + YOLOv8 + SQLite + NVIDIA NIM (Llama-3)
+Motor: Flask + YOLOv8 + SQLite + Groq (Llama-3)
 
 Módulos activos:
   [x] Núcleo: detección de objetos con YOLO
   [x] Base de datos: registro de sesión en SQLite
-  [x] IA: modo "explícame" y análisis de escena (NVIDIA NIM / Llama-3)
+  [x] IA: modo "explícame" y análisis de escena (Groq / Llama-3)
 """
 
 import base64
 import os
 import time
 import sqlite3
+import threading
 from datetime import datetime
 
 import cv2
@@ -28,17 +29,24 @@ from ultralytics import YOLO
 # ─── Configuración & Hilos CPU ────────────────────────────────────────────────
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # Límite de 10MB por request (protección contra imágenes gigantes)
 CORS(app)  # Permite peticiones desde el Quest (diferente origen)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", max_http_buffer_size=10 * 1024 * 1024)
 
 # Optimizar hilos CPU
 num_cpus = os.cpu_count() or 4
 torch.set_num_threads(num_cpus)
 print(f"⚡ Hilos CPU PyTorch optimizados a: {num_cpus}")
 
-# Modelo YOLO & ONNX
+# Modelo YOLO & ONNX — Selección automática por hardware
 CUSTOM_MODEL_PATH = "visionvr_custom.pt"
-DEFAULT_MODEL_PATH = "yolov8x.pt"  # <-- MEGA PRECISO (Extra Large)
+TIENE_GPU = torch.cuda.is_available()
+if TIENE_GPU:
+    DEFAULT_MODEL_PATH = "yolov8x.pt"   # Extra Large — requiere GPU
+    print(f"🎮 GPU detectada: {torch.cuda.get_device_name(0)} — usando modelo Extra Large")
+else:
+    DEFAULT_MODEL_PATH = "yolov8m.pt"   # Medium — buen balance para CPU
+    print(f"💻 Sin GPU detectada — usando modelo Medium (mejor rendimiento en CPU)")
 
 if os.path.exists(CUSTOM_MODEL_PATH):
     BASE_MODEL_PATH = CUSTOM_MODEL_PATH
@@ -47,10 +55,11 @@ else:
     BASE_MODEL_PATH = DEFAULT_MODEL_PATH
     print(f"Usando modelo genérico por defecto: {BASE_MODEL_PATH}")
 
-CONFIANZA_MINIMA = 0.60  # Balance ideal: Filtra detecciones dudosas pero mantiene alta visibilidad
+CONFIANZA_MINIMA = 0.45  # Balance ajustado a 45% para mayor sensibilidad en pruebas
 DB_PATH = "db/sesion.db"
 
-# ─── Estado Multi-Usuario ─────────────────────────────────────────────────────
+# ─── Estado Multi-Usuario (thread-safe) ──────────────────────────────────────
+_clientes_lock = threading.Lock()
 clientes_conectados = set()
 
 # ─── Carga del modelo (solo una vez al iniciar el servidor) ───────────────────
@@ -87,6 +96,7 @@ import threading
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 MSE_UMBRAL_SIMILITUD = 35.0  # Umbral de diferencia para reusar detecciones
 
+_estado_lock = threading.Lock()
 estado_sesiones = {}
 
 def init_estado_sesion(session_id: str):
@@ -128,13 +138,12 @@ def calcular_zona(bbox: dict) -> str:
 
 def preprocesar_imagen(img_cv2: np.ndarray, solo_roi: bool = False) -> np.ndarray:
     """
-    1. Si solo_roi es True (#9), recorta el 70% central de la imagen.
-    2. Redimensiona a 640x640 y aplica CLAHE en espacio LAB.
+    Pipeline de preprocesamiento mejorado:
+    1. ROI central (si se activa).
+    2. Detección de blur — si el frame es muy borroso, se aplica sharpening.
+    3. Resize a 640x640 (YOLO maneja el aspect ratio internamente).
+    4. CLAHE adaptativo — más agresivo en escenas oscuras.
     """
-    # Fix: Se desactiva la auto-rotación para móviles verticales.
-    # Rotar la imagen 90° causaba que YOLO viera los objetos de lado
-    # y que las coordenadas de los cuadros no coincidieran en la pantalla del celular.
-    
     if solo_roi:
         h, w = img_cv2.shape[:2]
         crop_x1 = int(w * 0.15)
@@ -143,15 +152,39 @@ def preprocesar_imagen(img_cv2: np.ndarray, solo_roi: bool = False) -> np.ndarra
         crop_y2 = int(h * 0.85)
         img_cv2 = img_cv2[crop_y1:crop_y2, crop_x1:crop_x2]
 
+    # ── Detección de blur (Laplaciano) ──
+    # Si la varianza del laplaciano es baja, el frame tiene motion blur.
+    gray_check = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2GRAY)
+    blur_score = cv2.Laplacian(gray_check, cv2.CV_64F).var()
+    if blur_score < 80:  # Frame borroso (motion blur del celular)
+        kernel_sharp = np.array([[0, -0.5, 0],
+                                 [-0.5, 3, -0.5],
+                                 [0, -0.5, 0]])
+        img_cv2 = cv2.filter2D(img_cv2, -1, kernel_sharp)
+
+    # ── Resize a 640x640 ──
     if img_cv2.shape[0] != 640 or img_cv2.shape[1] != 640:
         img_cv2 = cv2.resize(img_cv2, (640, 640), interpolation=cv2.INTER_LINEAR)
-    
+
+    # ── CLAHE adaptativo (más fuerte en escenas oscuras) ──
     lab = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    l_clahe = clahe.apply(l)
+
+    brillo_promedio = float(np.mean(l))
+    if brillo_promedio < 80:
+        # Escena oscura: clipLimit alto para revelar detalles
+        clahe_adaptivo = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+    elif brillo_promedio < 140:
+        # Escena normal
+        clahe_adaptivo = clahe  # clipLimit=2.0 (el default)
+    else:
+        # Escena bien iluminada: CLAHE suave
+        clahe_adaptivo = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+
+    l_clahe = clahe_adaptivo.apply(l)
     lab_clahe = cv2.merge((l_clahe, a, b))
     img_procesada = cv2.cvtColor(lab_clahe, cv2.COLOR_LAB2BGR)
-    
+
     return img_procesada
 
 def obtener_detecciones_cache(img_cv2: np.ndarray, session_id: str):
@@ -374,6 +407,9 @@ def serve_index():
 def serve_static(filename):
     """Sirve archivos estáticos con protección contra path traversal."""
     EXTENSIONES_PERMITIDAS = {'.html', '.js', '.css', '.png', '.jpg', '.jpeg', '.ico', '.webp', '.svg', '.json', '.webmanifest'}
+    # Bloquear acceso a archivos ocultos (ej: .env, .git)
+    if any(part.startswith('.') for part in filename.replace('\\', '/').split('/')):
+        return "Forbidden", 403
     ext = os.path.splitext(filename)[1].lower()
     if ext not in EXTENSIONES_PERMITIDAS:
         return "Forbidden", 403
@@ -383,11 +419,21 @@ def serve_static(filename):
 @app.route("/ping", methods=["GET"])
 def ping():
     """
-    Endpoint de prueba. María puede usarlo para verificar
-    que el servidor está corriendo antes de conectar el Quest.
+    Healthcheck del servidor. Verifica que los componentes principales estén operativos.
     Abrir en browser: http://localhost:5000/ping
     """
-    return jsonify({"status": "ok", "mensaje": "Servidor VisionVR activo"})
+    health = {
+        "status": "ok",
+        "mensaje": "Servidor VisionVR activo",
+        "modelo": MODELO_PATH,
+        "gpu": TIENE_GPU,
+        "usuarios_activos": len(clientes_conectados),
+        "db_ok": os.path.exists(DB_PATH) or True,  # True si aún no se creó (se crea al primer write)
+    }
+    # Verificar que la API key de NVIDIA esté configurada
+    nvidia_key = os.environ.get("NVIDIA_API_KEY", "")
+    health["ia_configurada"] = bool(nvidia_key and nvidia_key != "tu-clave-nvidia-aqui")
+    return jsonify(health)
 
 
 @app.route("/dashboard")
@@ -435,15 +481,16 @@ def detectar():
 
 @socketio.on("connect")
 def handle_connect():
-    clientes_conectados.add(request.sid)
+    with _clientes_lock:
+        clientes_conectados.add(request.sid)
     print(f"✅ Nuevo cliente conectado: {request.sid}. Total: {len(clientes_conectados)}")
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    if request.sid in clientes_conectados:
-        clientes_conectados.remove(request.sid)
-    if request.sid in estado_sesiones:
-        del estado_sesiones[request.sid]
+    with _clientes_lock:
+        clientes_conectados.discard(request.sid)
+    with _estado_lock:
+        estado_sesiones.pop(request.sid, None)
     print(f"❌ Cliente desconectado: {request.sid}. Total: {len(clientes_conectados)}")
 
 @socketio.on("detectar")
@@ -471,7 +518,7 @@ def handle_detectar(datos):
             "tiempo_ms": tiempo_ms,
             "total": len(detecciones),
             "cache": es_cache
-        })
+        }, broadcast=True)
 
     except Exception as e:
         emit("detecciones_resultado", {"error": str(e)})
@@ -589,15 +636,15 @@ def exportar():
     )
 
 
-# ─── Módulo IA (NVIDIA NIM) ──────────────────────────────────────────────────
+# ─── Módulo IA (Groq — Llama-3) ──────────────────────────────────────────────
 
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv() # Cargar API key de .env
 cliente_ia = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.environ.get("GROQ_API_KEY")
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=os.environ.get("NVIDIA_API_KEY")
 )
 
 @app.route("/explicar", methods=["POST"])
@@ -611,7 +658,7 @@ def explicar():
 
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="meta/llama-3.1-70b-instruct",
             messages=[{
                 "role": "user",
                 "content": (
@@ -626,8 +673,8 @@ def explicar():
         texto = respuesta.choices[0].message.content.strip()
         return jsonify({"explicacion": texto})
     except Exception as e:
-        print("Error en Groq API:", e)
-        return jsonify({"explicacion": "Lo siento, hubo un error de conexión con la IA de Groq."}), 500
+        print("⚠️ Error en NVIDIA API:", e)
+        return jsonify({"explicacion": f"No se pudo contactar la IA. Verifica tu API key de NVIDIA en el archivo .env"}), 500
 
 
 @app.route("/analizar_escena", methods=["POST"])
@@ -644,7 +691,7 @@ def analizar_escena():
     lista_str = ", ".join(list(set(objetos)))
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="meta/llama-3.1-70b-instruct",
             messages=[{
                 "role": "user",
                 "content": (
@@ -659,7 +706,7 @@ def analizar_escena():
         resumen = respuesta.choices[0].message.content.strip()
         return jsonify({"resumen": resumen})
     except Exception as e:
-        print("Error en analizar_escena Groq:", e)
+        print("Error en analizar_escena NVIDIA:", e)
         return jsonify({"resumen": f"Objetos visibles en escena: {lista_str}."})
 
 

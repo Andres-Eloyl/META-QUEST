@@ -1,7 +1,9 @@
-const CACHE_NAME = 'visionvr-v1';
+const CACHE_NAME = 'visionvr-v2';
 const urlsToCache = [
   '/',
   '/index.html',
+  '/dashboard.html',
+  '/test_movil.html',
   '/js/aframe.min.js',
   '/js/socket.io.min.js'
 ];

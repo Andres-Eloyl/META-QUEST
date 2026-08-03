@@ -254,7 +254,7 @@
             const tempCtx = tempCanvas.getContext('2d');
             tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
             
-            const base64 = tempCanvas.toDataURL('image/jpeg', 0.6); // 60% calidad para rapidez
+            const base64 = tempCanvas.toDataURL('image/jpeg', 0.82); // 82% calidad para mejor detección
             socket.emit("detectar", { imagen: base64 });
         }
 

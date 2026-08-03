@@ -933,15 +933,12 @@
           cameraCanvas.width = cameraVideo.videoWidth;
           cameraCanvas.height = cameraVideo.videoHeight;
           cameraCtx.drawImage(cameraVideo, 0, 0);
-          base64 = cameraCanvas.toDataURL('image/jpeg', 0.7);
+          base64 = cameraCanvas.toDataURL('image/jpeg', 0.82);
         } else {
-          // Fallback: capturar del canvas A-Frame (funciona en escritorio)
-          const canvas = escena.canvas;
-          if (!canvas) {
-            enviando = false;
-            return;
-          }
-          base64 = canvas.toDataURL('image/jpeg', 0.7);
+          // Si estamos en el Quest y la cámara está bloqueada, NO enviamos el canvas en negro.
+          // Actuamos solo como receptor (Hybrid Mode) de lo que envíe el celular.
+          enviando = false;
+          return;
         }
 
         socket.emit("detectar", { imagen: base64 });

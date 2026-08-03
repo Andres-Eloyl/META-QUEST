@@ -8,10 +8,8 @@ ultralytics>=8.2.0
 opencv-python>=4.9.0
 numpy>=1.26.4
 
-# Usar OpenAI para la API compatible de NVIDIA:
+# Groq API (compatible con OpenAI SDK)
 openai>=1.30.0
-
-# groq  (Ya no se usa)
 python-dotenv
 onnx
 onnxruntime

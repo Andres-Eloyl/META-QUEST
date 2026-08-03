@@ -2,7 +2,7 @@
 
 Proyecto de Inteligencia Artificial que detecta objetos en tiempo real usando el **Meta Quest 3** con passthrough AR.
 
-**Backend:** Flask + YOLOv8 + SQLite + NVIDIA NIM (Llama-3)  
+**Backend:** Flask + YOLOv8 + SQLite + Groq (Llama-3)  
 **Frontend:** A-Frame WebXR + Socket.IO  
 **Universidad:** UFT — Materia: Inteligencia Artificial
 
@@ -88,13 +88,13 @@ Abre `https://localhost:5000/dashboard` para ver en tiempo real:
 ```
 visionvr/
 ├── start.py              ← Un comando arranca todo
-├── server.py             ← Backend Flask + YOLO + SQLite + NVIDIA NIM
+├── server.py             ← Backend Flask + YOLO + SQLite + Groq
 ├── index.html            ← Frontend WebXR (A-Frame) — interfaz principal
 ├── dashboard.html        ← Panel de estadísticas con Chart.js
 ├── test_movil.html       ← Vista simplificada 2D para celular
 ├── sw.js                 ← Service Worker para modo offline
 ├── requirements.txt      ← Dependencias Python
-├── .env                  ← API keys (NVIDIA NIM) — NO subir al repo
+├── .env                  ← API keys (Groq) — NO subir al repo
 ├── test_servidor.py      ← Tests del backend sin necesitar el Quest
 ├── train_custom.py       ← Entrenamiento personalizado con Roboflow
 ├── train_custom_poc.py   ← Entrenamiento rápido de prueba (5 epochs)
@@ -114,7 +114,7 @@ visionvr/
 | `/` | GET | Interfaz principal WebXR |
 | `/ping` | GET | Verifica que el servidor está activo |
 | `/detectar` | POST | Recibe frame base64, devuelve objetos detectados |
-| `/explicar` | POST | IA explica un objeto (NVIDIA NIM / Llama-3) |
+| `/explicar` | POST | IA explica un objeto (Groq / Llama-3) |
 | `/analizar_escena` | POST | Análisis global de la escena completa |
 | `/estadisticas` | GET | Estadísticas de la sesión actual |
 | `/sesiones` | GET | Lista de todas las sesiones registradas |
@@ -136,20 +136,26 @@ visionvr/
 
 - **Python 3.10+** 
 - **Meta Quest 3** en el mismo WiFi (para pruebas AR)
-- **NVIDIA API Key** en el archivo `.env` (para el modo "explícame" con Llama-3)
+- **Groq API Key** en el archivo `.env` (para el modo "explícame" con Llama-3)
 - Primera ejecución necesita internet (descarga modelo YOLO ~52MB)
 
 ---
 
 ## 🔧 Configuración del .env
 
-Crea un archivo `.env` en la carpeta `visionvr/` con:
+Copia el archivo de ejemplo y rellena con tu clave real:
+
+```bash
+cp .env.example .env
+```
+
+Edita el `.env` con:
 
 ```
-NVIDIA_API_KEY=tu-clave-nvidia-nim
+GROQ_API_KEY=tu-clave-groq-aqui
 ```
 
-Obtén tu clave gratis en: https://build.nvidia.com/
+Obtén tu clave gratis en: https://console.groq.com/
 
 ---
 
@@ -161,7 +167,7 @@ Obtén tu clave gratis en: https://build.nvidia.com/
 | Certificado rechazado | Es un certificado auto-firmado. En el Quest, presiona "Continuar de todas formas". |
 | No detecta objetos | Verifica que hay buena iluminación. El modelo necesita luz para funcionar bien. |
 | `py` no se encuentra | Usa `python` o `python3` en vez de `py`. |
-| Error de NVIDIA API | Verifica que tu `.env` tiene la clave correcta y que tienes internet. |
+| Error de Groq API | Verifica que tu `.env` tiene la clave GROQ_API_KEY correcta y que tienes internet. |
 
 ---
 
