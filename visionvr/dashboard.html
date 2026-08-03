@@ -12,23 +12,29 @@
 
     <style>
         :root {
-            --bg-color: #0b0c10;
-            --surface-color: rgba(31, 33, 42, 0.6);
-            --border-color: rgba(255, 255, 255, 0.08);
-            --accent-glow: rgba(0, 255, 136, 0.15);
-            --text-primary: #ffffff;
-            --text-secondary: #8b92a5;
-            --accent: #00ff88;
+            --vinotinto: #5b1e31;
+            --vinotinto-dark: #3a101e;
+            --vinotinto-light: #7a2841;
+            --cream: #fdfbf7;
+            --gold: #d4af37;
+            
+            --bg-color: var(--cream);
+            --surface-color: #ffffff;
+            --border-color: rgba(91, 30, 49, 0.15);
+            --accent-glow: rgba(212, 175, 55, 0.15);
+            --text-primary: #1a1a1a;
+            --text-secondary: #5b1e31;
+            --accent: var(--gold);
         }
 
-        body.light-theme {
-            --bg-color: #f4f6f9;
-            --surface-color: #ffffff;
-            --border-color: rgba(0, 0, 0, 0.1);
-            --accent-glow: rgba(0, 200, 100, 0.1);
-            --text-primary: #1a1a2e;
-            --text-secondary: #555e6d;
-            --accent: #00aa55;
+        body.dark-theme {
+            --bg-color: var(--vinotinto-dark);
+            --surface-color: rgba(91, 30, 49, 0.6);
+            --border-color: rgba(212, 175, 55, 0.2);
+            --accent-glow: rgba(212, 175, 55, 0.15);
+            --text-primary: var(--cream);
+            --text-secondary: rgba(253, 251, 247, 0.8);
+            --accent: var(--gold);
         }
 
         * {
@@ -450,9 +456,9 @@
         }
 
         function toggleTema() {
-            document.body.classList.toggle('light-theme');
-            const esClaro = document.body.classList.contains('light-theme');
-            document.getElementById('btn-tema').textContent = esClaro ? '🌙 Tema Oscuro' : '☀️ Tema Claro';
+            document.body.classList.toggle('dark-theme');
+            const esOscuro = document.body.classList.contains('dark-theme');
+            document.getElementById('btn-tema').textContent = esOscuro ? '☀️ Tema Claro' : '🌙 Tema Oscuro';
         }
 
         // Iniciar ciclo de actualización cada 2 segundos
