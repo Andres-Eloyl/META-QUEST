@@ -144,6 +144,7 @@ def preprocesar_imagen(img_cv2: np.ndarray, solo_roi: bool = False) -> np.ndarra
     3. Resize a 640x640 (YOLO maneja el aspect ratio internamente).
     4. CLAHE adaptativo — más agresivo en escenas oscuras.
     """
+    # Se eliminó corregir_orientacion para evitar descuadre de bounding boxes en vertical.
     if solo_roi:
         h, w = img_cv2.shape[:2]
         crop_x1 = int(w * 0.15)
