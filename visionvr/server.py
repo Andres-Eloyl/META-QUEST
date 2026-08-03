@@ -207,38 +207,34 @@ def obtener_detecciones_cache(img_cv2: np.ndarray, session_id: str):
 
 def aplicar_filtro_ensemble(detecciones_raw: list, session_id: str) -> list:
     """
-    Ensemble de frames (#6): Exige que un objeto aparezca al menos en 2 de los últimos 3 frames
-    para considerarlo consistente y eliminar falsos positivos parpadeantes.
-    El buffer usa maxlen=3 para mantener baja la latencia en dispositivos móviles.
+    Filtro anti-parpadeo optimizado (cero delay de aparición, 1 frame de gracia al desaparecer).
+    Evita que los recuadros parpadeen cuando YOLO falla por motion blur.
     """
     init_estado_sesion(session_id)
     estado = estado_sesiones[session_id]
     
-    objetos_actuales = set()
-    for d in detecciones_raw:
-        # Usamos solo el nombre del objeto para el filtro ensemble,
-        # ya que los IDs de tracking pueden ser inestables en cámaras móviles
-        uid = d["objeto"]
-        objetos_actuales.add(uid)
-        
-    estado["buffer_historico_frames"].append(objetos_actuales)
+    objetos_actuales = {d["objeto"]: d for d in detecciones_raw}
     
-    if len(estado["buffer_historico_frames"]) < 2:
-        return detecciones_raw  # Aún no hay suficiente historial
+    if "ultimo_frame_objetos" not in estado:
+        estado["ultimo_frame_objetos"] = {}
         
-    conteo_presencia = Counter()
-    for frame_set in estado["buffer_historico_frames"]:
-        for uid in frame_set:
-            conteo_presencia[uid] += 1
-            
-    # Solo mantener objetos presentes en al menos 2 de los 3 frames
-    objetos_validos = set(uid for uid, count in conteo_presencia.items() if count >= 2)
-    
+    objetos_anteriores = estado["ultimo_frame_objetos"]
     filtradas = []
-    for d in detecciones_raw:
-        uid = d["objeto"]
-        if uid in objetos_validos:
-            filtradas.append(d)
+    
+    # 1. Aparecen instantáneamente (cero delay)
+    for uid, d in objetos_actuales.items():
+        filtradas.append(d)
+        
+    # 2. 1 frame de gracia para evitar parpadeos
+    for uid, d_old in objetos_anteriores.items():
+        if uid not in objetos_actuales:
+            # Mantener la última posición conocida por 1 frame extra
+            filtradas.append(d_old)
+            
+    # El estado guarda SOLO los detectados realmente en este frame
+    # (así los de gracia mueren al siguiente frame si siguen sin detectarse)
+    estado["ultimo_frame_objetos"] = objetos_actuales
+    
     return filtradas
 
 def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: str = "anonimo", usar_ensemble: bool = True, solo_roi: bool = False):
@@ -258,10 +254,9 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
         return cached_dets, 5, True
         
     inicio = time.time()
-    if usar_tracking:
-        resultados = modelo.track(img, persist=True, conf=CONFIANZA_MINIMA, iou=0.45, imgsz=640, verbose=False)
-    else:
-        resultados = modelo(img, conf=CONFIANZA_MINIMA, iou=0.45, imgsz=640, verbose=False)
+    # Desactivamos usar_tracking de YOLO (modelo.track) porque retiene 
+    # los recuadros fantasma de objetos perdidos por hasta 30 frames.
+    resultados = modelo(img, conf=CONFIANZA_MINIMA, iou=0.45, imgsz=640, verbose=False)
         
     tiempo_ms = round((time.time() - inicio) * 1000)
     
@@ -272,8 +267,6 @@ def procesar_frame(img_raw: np.ndarray, usar_tracking: bool = True, session_id: 
             confianza = round(float(box.conf), 3)
             
             track_id = None
-            if usar_tracking and box.id is not None:
-                track_id = int(box.id[0])
                 
             bbox = {
                 "x": round(float(box.xyxy[0][0])),
@@ -467,8 +460,7 @@ def detectar():
         if img is None:
             return jsonify({"error": "No se pudo decodificar la imagen"}), 400
 
-        usar_tracking = len(clientes_conectados) <= 1
-        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id="anonimo", usar_ensemble=False)
+        detecciones, tiempo_ms, es_cache = procesar_frame(img, session_id="anonimo", usar_ensemble=True)
 
         return jsonify({
             "detecciones": detecciones,
@@ -512,8 +504,7 @@ def handle_detectar(datos):
             emit("detecciones_resultado", {"error": "No se pudo decodificar la imagen"})
             return
 
-        usar_tracking = len(clientes_conectados) <= 1
-        detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id=session_id, usar_ensemble=False)
+        detecciones, tiempo_ms, es_cache = procesar_frame(img, session_id=session_id, usar_ensemble=True)
 
         socketio.emit("detecciones_resultado", {
             "detecciones": detecciones,
