@@ -513,12 +513,12 @@ def handle_detectar(datos):
         usar_tracking = len(clientes_conectados) <= 1
         detecciones, tiempo_ms, es_cache = procesar_frame(img, usar_tracking=usar_tracking, session_id=session_id)
 
-        emit("detecciones_resultado", {
+        socketio.emit("detecciones_resultado", {
             "detecciones": detecciones,
             "tiempo_ms": tiempo_ms,
             "total": len(detecciones),
             "cache": es_cache
-        }, broadcast=True)
+        })
 
     except Exception as e:
         emit("detecciones_resultado", {"error": str(e)})
@@ -658,7 +658,7 @@ def explicar():
 
     try:
         respuesta = cliente_ia.chat.completions.create(
-            model="meta/llama-3.1-70b-instruct",
+            model="meta/llama-3.1-8b-instruct",
             messages=[{
                 "role": "user",
                 "content": (
@@ -668,7 +668,7 @@ def explicar():
                     f"directa, clara e inteligente. No uses comillas."
                 )
             }],
-            max_tokens=150
+            max_tokens=100
         )
         texto = respuesta.choices[0].message.content.strip()
         return jsonify({"explicacion": texto})
