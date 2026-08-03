@@ -21,6 +21,11 @@ import signal
 import webbrowser
 import threading
 
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
+
 # ─── Colores para la consola ──────────────────────────────────────────────────
 
 class Color:
@@ -202,8 +207,36 @@ def main():
     print()
     print(f"  {Color.BOLD}{Color.CYAN}--- Para el Meta Quest 3 ---{Color.RESET}")
     print(f"  {Color.BOLD}Abre en el Quest:{Color.RESET}    https://{ip}:5000")
-    print(f"  {Color.DIM}(usa esa misma IP en el campo del frontend){Color.RESET}")
+    print(f"  {Color.DIM}(o escanea este código QR con tu celular y envíalo al Quest){Color.RESET}")
     print()
+    
+    if qrcode:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=1,
+            border=2,
+        )
+        qr.add_data(f"https://{ip}:5000")
+        qr.make(fit=True)
+        
+        if hasattr(sys.stdout, 'reconfigure'):
+            try:
+                sys.stdout.reconfigure(encoding='utf-8')
+            except Exception:
+                pass
+
+        matrix = qr.get_matrix()
+        try:
+            for row in matrix:
+                print("  " + "".join("██" if cell else "  " for cell in row))
+        except UnicodeEncodeError:
+            for row in matrix:
+                print("  " + "".join("##" if cell else "  " for cell in row))
+        print()
+    else:
+        print(f"  {Color.DIM}(Instala 'qrcode' con 'pip install qrcode' para ver el código aquí){Color.RESET}\n")
+
     print(f"  {Color.DIM}Presiona Ctrl+C para detener el servidor{Color.RESET}")
     print()
 

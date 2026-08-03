@@ -13,3 +13,4 @@ openai>=1.30.0
 python-dotenv
 onnx
 onnxruntime
+qrcode

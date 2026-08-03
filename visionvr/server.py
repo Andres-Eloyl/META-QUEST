@@ -637,7 +637,7 @@ from dotenv import load_dotenv
 load_dotenv() # Cargar API key de .env
 cliente_ia = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
-    api_key=os.environ.get("NVIDIA_API_KEY")
+    api_key=os.environ.get("NVIDIA_API_KEY", "falta_api_key_en_archivo_env")
 )
 
 @app.route("/explicar", methods=["POST"])
